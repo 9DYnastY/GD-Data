@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
 import DifficultyGrid from './DifficultyGrid.vue'
+import LazyCoverImage from './LazyCoverImage.vue'
 import type { SongViewModel } from '../types/song'
 
 defineProps<{
@@ -11,15 +12,12 @@ defineProps<{
 <template>
   <article class="song-card">
     <div class="song-card__hero">
-      <div class="song-card__cover">
-        <img
-          v-if="song.heroImageUrl"
-          :src="song.heroImageUrl"
-          :alt="`${song.displayTitle} cover`"
-          loading="lazy"
-        />
-        <span v-else>{{ song.imageFallback }}</span>
-      </div>
+      <LazyCoverImage
+        class="song-card__cover"
+        :alt="`${song.displayTitle} cover`"
+        :fallback-text="song.imageFallback"
+        :src="song.heroImageUrl"
+      />
 
       <div class="song-card__summary">
         <div class="song-card__heading">
@@ -68,26 +66,7 @@ defineProps<{
 }
 
 .song-card__cover {
-  position: relative;
-  overflow: hidden;
-  min-height: 148px;
-  border-radius: 26px;
-  background:
-    radial-gradient(circle at top, rgba(191, 87, 0, 0.34), transparent 55%),
-    linear-gradient(160deg, #131923, #2f3445);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 1.7rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-}
-
-.song-card__cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  min-width: 0;
 }
 
 .song-card__summary {
@@ -142,10 +121,6 @@ defineProps<{
 
   .song-card__hero {
     grid-template-columns: 1fr;
-  }
-
-  .song-card__cover {
-    min-height: 180px;
   }
 
   .song-card__heading {
