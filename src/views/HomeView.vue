@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
 import SongCard from '../components/SongCard.vue'
 import { loadSongCatalog } from '../lib/song-catalog'
 import type { SongFilters, SongViewModel, SortKey, ToggleFilterValue } from '../types/song'
 
 const SEARCH_STORAGE_KEY = 'gddata:last-search'
+const PAGE_SIZE = 20
 
 const songs = ref<SongViewModel[]>([])
 const loading = ref(true)
 const errorMessage = ref('')
 const showFilters = ref(false)
+const visibleCount = ref(PAGE_SIZE)
+const loadMoreTrigger = ref<HTMLElement | null>(null)
 const searchQuery = ref(
   typeof window === 'undefined' ? '' : window.localStorage.getItem(SEARCH_STORAGE_KEY) ?? '',
 )
@@ -70,6 +73,7 @@ function createUniqueOptions(songsList: SongViewModel[], field: 'version' | 'typ
 const versionOptions = computed(() => createUniqueOptions(songs.value, 'version'))
 const typeOptions = computed(() => createUniqueOptions(songs.value, 'type'))
 const genreOptions = computed(() => createUniqueOptions(songs.value, 'genre'))
+let loadMoreObserver: IntersectionObserver | null = null
 
 const hasActiveFilters = computed(() => {
   return (
@@ -235,11 +239,72 @@ const filteredSongs = computed(() => {
   })
 })
 
+const visibleSongs = computed(() => filteredSongs.value.slice(0, visibleCount.value))
+const hasMoreSongs = computed(() => visibleSongs.value.length < filteredSongs.value.length)
+
 watch(searchQuery, (value) => {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(SEARCH_STORAGE_KEY, value)
   }
 })
+
+watch(
+  [
+    searchQuery,
+    sortKey,
+    () => filters.versionKey,
+    () => filters.typeKey,
+    () => filters.genreKey,
+    () => filters.classic,
+    () => filters.remaster,
+    () => filters.long,
+    () => filters.guitarMin,
+    () => filters.guitarMax,
+    () => filters.drumMin,
+    () => filters.drumMax,
+    () => filters.bassMin,
+    () => filters.bassMax,
+  ],
+  () => {
+    visibleCount.value = PAGE_SIZE
+  },
+)
+
+function loadMoreSongs() {
+  if (!hasMoreSongs.value) {
+    return
+  }
+
+  visibleCount.value = Math.min(visibleCount.value + PAGE_SIZE, filteredSongs.value.length)
+}
+
+function setupLoadMoreObserver() {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+
+  if (!loadMoreTrigger.value || !hasMoreSongs.value) {
+    return
+  }
+
+  if (typeof IntersectionObserver === 'undefined') {
+    return
+  }
+
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        loadMoreSongs()
+      }
+    },
+    {
+      root: null,
+      rootMargin: '280px 0px',
+      threshold: 0.01,
+    },
+  )
+
+  loadMoreObserver.observe(loadMoreTrigger.value)
+}
 
 function resetFilters() {
   filters.versionKey = ''
@@ -269,7 +334,22 @@ onMounted(async () => {
     errorMessage.value = error instanceof Error ? error.message : 'Failed to load catalog'
   } finally {
     loading.value = false
+    await nextTick()
+    setupLoadMoreObserver()
   }
+})
+
+watch(
+  [visibleSongs, hasMoreSongs, loadMoreTrigger],
+  async () => {
+    await nextTick()
+    setupLoadMoreObserver()
+  },
+  { flush: 'post' },
+)
+
+onBeforeUnmount(() => {
+  loadMoreObserver?.disconnect()
 })
 </script>
 
@@ -421,7 +501,7 @@ onMounted(async () => {
       <div class="result-bar">
         <div class="result-bar__summary">
           <p>Result count</p>
-          <strong>{{ filteredSongs.length }} / {{ songs.length }} songs</strong>
+          <strong>{{ visibleSongs.length }} shown / {{ filteredSongs.length }} matched / {{ songs.length }} total</strong>
         </div>
 
         <label class="result-bar__sort">
@@ -452,11 +532,22 @@ onMounted(async () => {
       />
 
       <SongCard
-        v-for="song in filteredSongs"
+        v-for="song in visibleSongs"
         v-else
         :key="song.musicId"
         :song="song"
       />
+
+      <div
+        v-if="hasMoreSongs"
+        ref="loadMoreTrigger"
+        class="load-more-sentinel"
+      >
+        <p>Scroll to load 20 more songs</p>
+        <button class="action-button action-button--ghost" type="button" @click="loadMoreSongs">
+          Load more now
+        </button>
+      </div>
     </section>
   </section>
 </template>
@@ -632,6 +723,22 @@ onMounted(async () => {
 .list-section {
   display: grid;
   gap: 16px;
+}
+
+.load-more-sentinel {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px dashed rgba(31, 41, 55, 0.14);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.load-more-sentinel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .state-panel {
