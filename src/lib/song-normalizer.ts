@@ -20,22 +20,98 @@ const LEVEL_ORDER: Array<{ key: LevelKey; label: string }> = [
   { key: 'master', label: 'Master' },
 ]
 
+const GF_VERSION_MAP: Record<number, string> = {
+  0: 'GF1st',
+  1: 'GF2nd',
+  2: 'GF3rd',
+  3: 'GF4th',
+  4: 'GF5th',
+  5: 'GF6th',
+  6: 'GF7th',
+  7: 'GF8th',
+  8: 'GF9th',
+  9: 'GF10th',
+  10: 'GF11th',
+  11: 'V',
+  12: 'V2',
+  13: 'V3',
+  14: 'V4',
+  15: 'V5',
+  16: 'V6',
+  17: 'XG',
+  18: 'XG2',
+  19: 'XG3',
+  20: 'GITADORA',
+  21: 'OverDrive',
+  22: 'Tri-Boost',
+  23: 'Tri-Boost Re:EVOLVE',
+  24: 'Matixx',
+  25: 'EXCHAIN',
+  26: 'NEX+AGE',
+  27: 'HIGH-VOLTAGE',
+  28: 'FUZZ-UP',
+  29: 'GALAXXY WAVE',
+  30: 'GALAXY WAVE DELTA',
+}
+
+const DM_VERSION_MAP: Record<number, string> = {
+  0: 'DM1st',
+  1: 'DM2nd',
+  2: 'DM3rd',
+  3: 'DM4th',
+  4: 'DM5th',
+  5: 'DM6th',
+  6: 'DM7th',
+  7: 'DM8th',
+  8: 'DM9th',
+  9: 'DM10th',
+  10: 'V',
+  11: 'V2',
+  12: 'V3',
+  13: 'V4',
+  14: 'V5',
+  15: 'V6',
+  16: 'XG',
+  17: 'XG2',
+  18: 'XG3',
+  19: 'GITADORA',
+  20: 'OverDrive',
+  21: 'Tri-Boost',
+  22: 'Tri-Boost Re:EVOLVE',
+  23: 'Matixx',
+  24: 'EXCHAIN',
+  25: 'NEX+AGE',
+  26: 'HIGH-VOLTAGE',
+  27: 'FUZZ-UP',
+  28: 'GALAXXY WAVE',
+  29: 'GALAXY WAVE DELTA',
+}
+
 function normalizeText(value: string | null | undefined, fallback: string): string {
   const trimmed = value?.trim()
   return trimmed ? trimmed : fallback
 }
 
 function createVersionLabel(firstVer: number[] | null): { key: string; label: string } {
-  if (!firstVer || firstVer.length === 0) {
+  if (!firstVer || firstVer.length < 2) {
     return { key: 'unknown', label: 'Version TBD' }
   }
 
   const numbers = firstVer.filter((entry) => Number.isFinite(entry))
   const key = numbers.join('-')
+  const gfVersion = GF_VERSION_MAP[firstVer[0]]
+  const dmVersion = DM_VERSION_MAP[firstVer[1]]
+
+  if (!gfVersion || !dmVersion) {
+    return {
+      key: key || 'unknown',
+      label: `Version ${key || 'TBD'}`,
+    }
+  }
 
   return {
     key: key || 'unknown',
-    label: `Debut ${key || 'TBD'}`,
+    label: gfVersion === dmVersion ? gfVersion : `${gfVersion} / ${dmVersion}`,
   }
 }
 

@@ -93,11 +93,6 @@ export interface SongViewModel {
 
 export interface SongFilters {
   versionKey: string
-  typeKey: string
-  genreKey: string
-  classic: ToggleFilterValue
-  remaster: ToggleFilterValue
-  long: ToggleFilterValue
   guitarMin: string
   guitarMax: string
   drumMin: string

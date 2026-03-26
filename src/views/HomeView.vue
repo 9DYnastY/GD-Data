@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import EmptyState from '../components/EmptyState.vue'
 import SongCard from '../components/SongCard.vue'
 import { loadSongCatalog } from '../lib/song-catalog'
-import type { SongFilters, SongViewModel, SortKey, ToggleFilterValue } from '../types/song'
+import type { SongFilters, SongViewModel, SortKey } from '../types/song'
 
 const SEARCH_STORAGE_KEY = 'gddata:last-search'
 const PAGE_SIZE = 20
@@ -21,11 +21,6 @@ const sortKey = ref<SortKey>('default')
 const sortDirection = ref<'asc' | 'desc'>('asc')
 const filters = reactive<SongFilters>({
   versionKey: '',
-  typeKey: '',
-  genreKey: '',
-  classic: 'all',
-  remaster: 'all',
-  long: 'all',
   guitarMin: '',
   guitarMax: '',
   drumMin: '',
@@ -72,18 +67,11 @@ function createUniqueOptions(songsList: SongViewModel[], field: 'version' | 'typ
 }
 
 const versionOptions = computed(() => createUniqueOptions(songs.value, 'version'))
-const typeOptions = computed(() => createUniqueOptions(songs.value, 'type'))
-const genreOptions = computed(() => createUniqueOptions(songs.value, 'genre'))
 let loadMoreObserver: IntersectionObserver | null = null
 
 const hasActiveFilters = computed(() => {
   return (
     filters.versionKey !== '' ||
-    filters.typeKey !== '' ||
-    filters.genreKey !== '' ||
-    filters.classic !== 'all' ||
-    filters.remaster !== 'all' ||
-    filters.long !== 'all' ||
     filters.guitarMin !== '' ||
     filters.guitarMax !== '' ||
     filters.drumMin !== '' ||
@@ -92,14 +80,6 @@ const hasActiveFilters = computed(() => {
     filters.bassMax !== ''
   )
 })
-
-function matchesToggle(value: boolean, filterValue: ToggleFilterValue) {
-  if (filterValue === 'all') {
-    return true
-  }
-
-  return filterValue === 'yes' ? value : !value
-}
 
 function parseRangeValue(value: string): number | null {
   if (!value.trim()) {
@@ -165,26 +145,6 @@ const filteredSongs = computed(() => {
     }
 
     if (filters.versionKey && song.versionKey !== filters.versionKey) {
-      return false
-    }
-
-    if (filters.typeKey && song.typeKey !== filters.typeKey) {
-      return false
-    }
-
-    if (filters.genreKey && song.genreKey !== filters.genreKey) {
-      return false
-    }
-
-    if (!matchesToggle(song.tags.includes('Classic'), filters.classic)) {
-      return false
-    }
-
-    if (!matchesToggle(song.tags.includes('Remaster'), filters.remaster)) {
-      return false
-    }
-
-    if (!matchesToggle(song.tags.includes('Long'), filters.long)) {
       return false
     }
 
@@ -263,12 +223,8 @@ watch(
   [
     searchQuery,
     sortKey,
+    sortDirection,
     () => filters.versionKey,
-    () => filters.typeKey,
-    () => filters.genreKey,
-    () => filters.classic,
-    () => filters.remaster,
-    () => filters.long,
     () => filters.guitarMin,
     () => filters.guitarMax,
     () => filters.drumMin,
@@ -319,11 +275,6 @@ function setupLoadMoreObserver() {
 
 function resetFilters() {
   filters.versionKey = ''
-  filters.typeKey = ''
-  filters.genreKey = ''
-  filters.classic = 'all'
-  filters.remaster = 'all'
-  filters.long = 'all'
   filters.guitarMin = ''
   filters.guitarMax = ''
   filters.drumMin = ''
@@ -336,6 +287,7 @@ function clearAllConditions() {
   searchQuery.value = ''
   resetFilters()
   sortKey.value = 'default'
+  sortDirection.value = 'asc'
 }
 
 function openFilters() {
@@ -388,128 +340,80 @@ onBeforeUnmount(() => {
           />
         </div>
 
-      </section>
+        <transition name="panel-fade">
+          <section v-if="showFilters" class="filter-drawer">
+            <div class="filter-drawer__sort">
+              <label class="sort-box">
+                <span>Sort</span>
+                <select v-model="sortKey">
+                  <option v-for="option in sortOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
 
-      <transition name="panel-fade">
-        <section v-if="showFilters" class="filter-drawer">
-          <div class="filter-drawer__sort">
-            <label class="sort-box">
-              <span>Sort</span>
-              <select v-model="sortKey">
-                <option v-for="option in sortOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-
-            <label class="sort-box">
-              <span>Direction</span>
-              <select v-model="sortDirection">
-                <option value="asc">Asc</option>
-                <option value="desc">Desc</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="filter-drawer__grid">
-            <label>
-              <span>Version</span>
-              <select v-model="filters.versionKey">
-                <option value="">All versions</option>
-                <option v-for="option in versionOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-
-            <label>
-              <span>Type</span>
-              <select v-model="filters.typeKey">
-                <option value="">All types</option>
-                <option v-for="option in typeOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-
-            <label>
-              <span>Genre</span>
-              <select v-model="filters.genreKey">
-                <option value="">All genres</option>
-                <option v-for="option in genreOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-
-            <label>
-              <span>Classic</span>
-              <select v-model="filters.classic">
-                <option value="all">All</option>
-                <option value="yes">Only classic</option>
-                <option value="no">Exclude classic</option>
-              </select>
-            </label>
-
-            <label>
-              <span>Remaster</span>
-              <select v-model="filters.remaster">
-                <option value="all">All</option>
-                <option value="yes">Only remaster</option>
-                <option value="no">Exclude remaster</option>
-              </select>
-            </label>
-
-            <label>
-              <span>Long</span>
-              <select v-model="filters.long">
-                <option value="all">All</option>
-                <option value="yes">Only long</option>
-                <option value="no">Exclude long</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="filter-drawer__ranges">
-            <label>
-              <span>Guitar min</span>
-              <input v-model="filters.guitarMin" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Guitar max</span>
-              <input v-model="filters.guitarMax" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Drum min</span>
-              <input v-model="filters.drumMin" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Drum max</span>
-              <input v-model="filters.drumMax" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Bass min</span>
-              <input v-model="filters.bassMin" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Bass max</span>
-              <input v-model="filters.bassMax" type="number" min="0" max="15" step="0.01" />
-            </label>
-          </div>
-
-          <div class="filter-drawer__footer">
-            <p>Difficulty range uses each instrument's highest available chart.</p>
-            <div class="filter-drawer__footer-actions">
-              <button class="action-button action-button--ghost" type="button" @click="resetFilters">
-                Clear filters
-              </button>
-              <button class="action-button action-button--muted" type="button" @click="showFilters = false">
-                Hide panel
-              </button>
+              <label class="sort-box">
+                <span>Direction</span>
+                <select v-model="sortDirection">
+                  <option value="asc">Asc</option>
+                  <option value="desc">Desc</option>
+                </select>
+              </label>
             </div>
-          </div>
-        </section>
-      </transition>
+
+            <div class="filter-drawer__grid filter-drawer__grid--single">
+              <label>
+                <span>Version</span>
+                <select v-model="filters.versionKey">
+                  <option value="">All versions</option>
+                  <option v-for="option in versionOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <div class="filter-drawer__ranges">
+              <label>
+                <span>Guitar min</span>
+                <input v-model="filters.guitarMin" type="number" min="0" max="15" step="0.01" />
+              </label>
+              <label>
+                <span>Guitar max</span>
+                <input v-model="filters.guitarMax" type="number" min="0" max="15" step="0.01" />
+              </label>
+              <label>
+                <span>Drum min</span>
+                <input v-model="filters.drumMin" type="number" min="0" max="15" step="0.01" />
+              </label>
+              <label>
+                <span>Drum max</span>
+                <input v-model="filters.drumMax" type="number" min="0" max="15" step="0.01" />
+              </label>
+              <label>
+                <span>Bass min</span>
+                <input v-model="filters.bassMin" type="number" min="0" max="15" step="0.01" />
+              </label>
+              <label>
+                <span>Bass max</span>
+                <input v-model="filters.bassMax" type="number" min="0" max="15" step="0.01" />
+              </label>
+            </div>
+
+            <div class="filter-drawer__footer">
+              <p>Difficulty range uses each instrument's highest available chart.</p>
+              <div class="filter-drawer__footer-actions">
+                <button class="action-button action-button--ghost" type="button" @click="resetFilters">
+                  Clear filters
+                </button>
+                <button class="action-button action-button--muted" type="button" @click="showFilters = false">
+                  Hide panel
+                </button>
+              </div>
+            </div>
+          </section>
+        </transition>
+      </section>
 
       <section v-if="loading" class="state-card">
         Loading catalog data...
@@ -603,7 +507,7 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 0;
   padding: 12px;
-  margin-bottom: 0;
+  margin-bottom: 16px;
   border-left: 0;
   border-right: 0;
 }
@@ -613,12 +517,12 @@ onBeforeUnmount(() => {
 }
 
 .control-deck__input {
-  min-height: 52px;
+  min-height: 42px;
   border: 0;
   border-radius: 0;
   background: rgba(61, 52, 119, 0.02);
   box-shadow: none;
-  padding: 0 4px;
+  padding: 0 2px;
 }
 
 .control-deck__input:focus {
@@ -648,14 +552,9 @@ onBeforeUnmount(() => {
 .filter-drawer {
   display: grid;
   gap: 12px;
-  width: 100vw;
-  margin-left: calc(50% - 50vw);
   padding: 12px;
-  margin-bottom: 16px;
-  margin-top: -1px;
+  margin-top: 12px;
   border-top: 0;
-  border-left: 0;
-  border-right: 0;
 }
 
 .control-deck--expanded {
@@ -673,6 +572,10 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.filter-drawer__grid--single {
+  grid-template-columns: 1fr;
 }
 
 .filter-drawer__footer {
@@ -743,7 +646,6 @@ onBeforeUnmount(() => {
 
 @media (max-width: 720px) {
   .filter-drawer__sort,
-  .filter-drawer__grid,
   .filter-drawer__ranges {
     grid-template-columns: 1fr 1fr;
   }
