@@ -52,7 +52,7 @@ const highlightTags = computed(() => {
 .song-card {
   display: grid;
   gap: 14px;
-  padding: 16px;
+  padding: 14px;
   background: rgba(81, 67, 162, 0.84);
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: var(--shadow-soft);
@@ -71,8 +71,8 @@ const highlightTags = computed(() => {
 
 .song-card__hero {
   display: grid;
-  grid-template-columns: 118px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 14px;
 }
 
 .song-card__copy {
@@ -127,8 +127,8 @@ const highlightTags = computed(() => {
   }
 
   .song-card__hero {
-    grid-template-columns: 110px minmax(0, 1fr);
-    gap: 14px;
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 12px;
   }
 
   .song-card h2 {

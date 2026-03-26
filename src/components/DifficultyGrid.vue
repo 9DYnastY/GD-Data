@@ -44,7 +44,6 @@ function levelClass(level: LevelKey) {
         </div>
       </div>
     </div>
-    <p class="arcade-grid__legend">Rows: Master / Extreme / Advanced / Basic</p>
   </div>
 
   <div v-else class="detail-grid">
@@ -82,7 +81,7 @@ function levelClass(level: LevelKey) {
 <style scoped>
 .arcade-grid {
   display: grid;
-  gap: 10px;
+  gap: 0;
   padding: 12px;
   background: rgba(81, 67, 162, 0.34);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -136,13 +135,6 @@ function levelClass(level: LevelKey) {
 
 .difficulty-cell--basic {
   background: rgba(37, 99, 235, 0.42);
-}
-
-.arcade-grid__legend {
-  margin: 0;
-  color: rgba(190, 183, 214, 0.8);
-  font-size: 0.66rem;
-  text-align: right;
 }
 
 .detail-grid {

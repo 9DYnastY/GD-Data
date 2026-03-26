@@ -92,23 +92,6 @@ const hasActiveFilters = computed(() => {
   )
 })
 
-const activeFilterCount = computed(() => {
-  return [
-    filters.versionKey,
-    filters.typeKey,
-    filters.genreKey,
-    filters.classic !== 'all' ? filters.classic : '',
-    filters.remaster !== 'all' ? filters.remaster : '',
-    filters.long !== 'all' ? filters.long : '',
-    filters.guitarMin,
-    filters.guitarMax,
-    filters.drumMin,
-    filters.drumMax,
-    filters.bassMin,
-    filters.bassMax,
-  ].filter(Boolean).length
-})
-
 function matchesToggle(value: boolean, filterValue: ToggleFilterValue) {
   if (filterValue === 'all') {
     return true
@@ -315,7 +298,7 @@ function setupLoadMoreObserver() {
     },
     {
       root: null,
-      rootMargin: '260px 0px',
+      rootMargin: '220px 0px',
       threshold: 0.01,
     },
   )
@@ -344,14 +327,8 @@ function clearAllConditions() {
   sortKey.value = 'default'
 }
 
-function toggleFilters() {
-  showFilters.value = !showFilters.value
-}
-
-function scrollToTop() {
-  if (typeof window !== 'undefined') {
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
+function openFilters() {
+  showFilters.value = true
 }
 
 onMounted(async () => {
@@ -382,261 +359,230 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="home-view">
-    <section class="control-deck">
-      <div class="control-deck__search">
-        <input
-          v-model="searchQuery"
-          type="search"
-          placeholder="Search title / artist / music ID"
-        />
-        <button class="action-button action-button--muted" type="button" @click="toggleFilters">
-          {{ showFilters ? 'Hide filters' : 'Show filters' }}
-        </button>
-      </div>
+    <video class="home-view__video" autoplay loop muted playsinline>
+      <source src="/5_background.mp4" type="video/mp4" />
+    </video>
+    <div class="home-view__overlay"></div>
 
-      <div class="control-deck__stats">
-        <article class="stat-tile">
-          <span>Shown</span>
-          <strong>{{ visibleSongs.length }}</strong>
-        </article>
-        <article class="stat-tile">
-          <span>Matched</span>
-          <strong>{{ filteredSongs.length }}</strong>
-        </article>
-        <article class="stat-tile">
-          <span>Filters</span>
-          <strong>{{ activeFilterCount }}</strong>
-        </article>
-      </div>
-
-      <div class="control-deck__bar">
-        <label class="sort-box">
-          <span>Sort</span>
-          <select v-model="sortKey">
-            <option v-for="option in sortOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <button class="action-button action-button--ghost" type="button" @click="clearAllConditions">
-          Reset all
-        </button>
-      </div>
-    </section>
-
-    <transition name="panel-fade">
-      <section v-if="showFilters" class="filter-drawer">
-        <div class="filter-drawer__grid">
-          <label>
-            <span>Version</span>
-            <select v-model="filters.versionKey">
-              <option value="">All versions</option>
-              <option v-for="option in versionOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-
-          <label>
-            <span>Type</span>
-            <select v-model="filters.typeKey">
-              <option value="">All types</option>
-              <option v-for="option in typeOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-
-          <label>
-            <span>Genre</span>
-            <select v-model="filters.genreKey">
-              <option value="">All genres</option>
-              <option v-for="option in genreOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-
-          <label>
-            <span>Classic</span>
-            <select v-model="filters.classic">
-              <option value="all">All</option>
-              <option value="yes">Only classic</option>
-              <option value="no">Exclude classic</option>
-            </select>
-          </label>
-
-          <label>
-            <span>Remaster</span>
-            <select v-model="filters.remaster">
-              <option value="all">All</option>
-              <option value="yes">Only remaster</option>
-              <option value="no">Exclude remaster</option>
-            </select>
-          </label>
-
-          <label>
-            <span>Long</span>
-            <select v-model="filters.long">
-              <option value="all">All</option>
-              <option value="yes">Only long</option>
-              <option value="no">Exclude long</option>
-            </select>
-          </label>
+    <div class="home-view__inner">
+      <section class="control-deck">
+        <div class="control-deck__search">
+          <input
+            v-model="searchQuery"
+            type="search"
+            placeholder="Search title / artist / music ID"
+            @click="openFilters"
+            @focus="openFilters"
+          />
         </div>
 
-        <div class="filter-drawer__ranges">
-          <label>
-            <span>Guitar min</span>
-            <input v-model="filters.guitarMin" type="number" min="0" max="15" step="0.01" />
+        <div class="control-deck__bar">
+          <label class="sort-box">
+            <span>Sort</span>
+            <select v-model="sortKey">
+              <option v-for="option in sortOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
           </label>
-          <label>
-            <span>Guitar max</span>
-            <input v-model="filters.guitarMax" type="number" min="0" max="15" step="0.01" />
-          </label>
-          <label>
-            <span>Drum min</span>
-            <input v-model="filters.drumMin" type="number" min="0" max="15" step="0.01" />
-          </label>
-          <label>
-            <span>Drum max</span>
-            <input v-model="filters.drumMax" type="number" min="0" max="15" step="0.01" />
-          </label>
-          <label>
-            <span>Bass min</span>
-            <input v-model="filters.bassMin" type="number" min="0" max="15" step="0.01" />
-          </label>
-          <label>
-            <span>Bass max</span>
-            <input v-model="filters.bassMax" type="number" min="0" max="15" step="0.01" />
-          </label>
-        </div>
-
-        <div class="filter-drawer__footer">
-          <p>Difficulty range uses each instrument's highest available chart.</p>
-          <button class="action-button action-button--ghost" type="button" @click="resetFilters">
-            Clear filters
+          <button class="action-button action-button--ghost" type="button" @click="clearAllConditions">
+            Reset all
           </button>
         </div>
       </section>
-    </transition>
 
-    <section v-if="loading" class="state-card">
-      Loading catalog data...
-    </section>
+      <transition name="panel-fade">
+        <section v-if="showFilters" class="filter-drawer">
+          <div class="filter-drawer__grid">
+            <label>
+              <span>Version</span>
+              <select v-model="filters.versionKey">
+                <option value="">All versions</option>
+                <option v-for="option in versionOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
 
-    <section v-else-if="errorMessage" class="state-card state-card--error">
-      {{ errorMessage }}
-    </section>
+            <label>
+              <span>Type</span>
+              <select v-model="filters.typeKey">
+                <option value="">All types</option>
+                <option v-for="option in typeOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
 
-    <section v-else class="list-section">
-      <EmptyState
-        v-if="filteredSongs.length === 0"
-        :has-filters="hasActiveFilters"
-        :query="searchQuery"
-        @reset="clearAllConditions"
-      />
+            <label>
+              <span>Genre</span>
+              <select v-model="filters.genreKey">
+                <option value="">All genres</option>
+                <option v-for="option in genreOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
 
-      <SongCard
-        v-for="song in visibleSongs"
-        v-else
-        :key="song.musicId"
-        :song="song"
-      />
+            <label>
+              <span>Classic</span>
+              <select v-model="filters.classic">
+                <option value="all">All</option>
+                <option value="yes">Only classic</option>
+                <option value="no">Exclude classic</option>
+              </select>
+            </label>
 
-      <div
-        v-if="hasMoreSongs"
-        ref="loadMoreTrigger"
-        class="load-more-card"
-      >
-        <p>Scroll to load 20 more songs</p>
-        <button class="action-button action-button--ghost" type="button" @click="loadMoreSongs">
-          Load more
-        </button>
-      </div>
-    </section>
+            <label>
+              <span>Remaster</span>
+              <select v-model="filters.remaster">
+                <option value="all">All</option>
+                <option value="yes">Only remaster</option>
+                <option value="no">Exclude remaster</option>
+              </select>
+            </label>
 
-    <nav class="bottom-dock">
-      <button class="bottom-dock__item bottom-dock__item--active" type="button">
-        <span class="bottom-dock__icon">□</span>
-        <span>Library</span>
-      </button>
-      <button class="bottom-dock__item" type="button" @click="toggleFilters">
-        <span class="bottom-dock__icon">◇</span>
-        <span>Filters</span>
-      </button>
-      <button class="bottom-dock__item" type="button" @click="scrollToTop">
-        <span class="bottom-dock__icon">△</span>
-        <span>Top</span>
-      </button>
-    </nav>
+            <label>
+              <span>Long</span>
+              <select v-model="filters.long">
+                <option value="all">All</option>
+                <option value="yes">Only long</option>
+                <option value="no">Exclude long</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="filter-drawer__ranges">
+            <label>
+              <span>Guitar min</span>
+              <input v-model="filters.guitarMin" type="number" min="0" max="15" step="0.01" />
+            </label>
+            <label>
+              <span>Guitar max</span>
+              <input v-model="filters.guitarMax" type="number" min="0" max="15" step="0.01" />
+            </label>
+            <label>
+              <span>Drum min</span>
+              <input v-model="filters.drumMin" type="number" min="0" max="15" step="0.01" />
+            </label>
+            <label>
+              <span>Drum max</span>
+              <input v-model="filters.drumMax" type="number" min="0" max="15" step="0.01" />
+            </label>
+            <label>
+              <span>Bass min</span>
+              <input v-model="filters.bassMin" type="number" min="0" max="15" step="0.01" />
+            </label>
+            <label>
+              <span>Bass max</span>
+              <input v-model="filters.bassMax" type="number" min="0" max="15" step="0.01" />
+            </label>
+          </div>
+
+          <div class="filter-drawer__footer">
+            <p>Difficulty range uses each instrument's highest available chart.</p>
+            <button class="action-button action-button--ghost" type="button" @click="resetFilters">
+              Clear filters
+            </button>
+          </div>
+        </section>
+      </transition>
+
+      <section v-if="loading" class="state-card">
+        Loading catalog data...
+      </section>
+
+      <section v-else-if="errorMessage" class="state-card state-card--error">
+        {{ errorMessage }}
+      </section>
+
+      <section v-else class="list-section">
+        <EmptyState
+          v-if="filteredSongs.length === 0"
+          :has-filters="hasActiveFilters"
+          :query="searchQuery"
+          @reset="clearAllConditions"
+        />
+
+        <SongCard
+          v-for="song in visibleSongs"
+          v-else
+          :key="song.musicId"
+          :song="song"
+        />
+
+        <div
+          v-if="hasMoreSongs"
+          ref="loadMoreTrigger"
+          class="load-more-card"
+        >
+          <p>Scroll to load 20 more songs</p>
+          <button class="action-button action-button--ghost" type="button" @click="loadMoreSongs">
+            Load more
+          </button>
+        </div>
+      </section>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .home-view {
   position: relative;
-  width: min(100%, 430px);
+  min-height: 100vh;
+}
+
+.home-view__video,
+.home-view__overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.home-view__video {
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.home-view__overlay {
+  z-index: 1;
+  background:
+    linear-gradient(rgba(10, 10, 15, 0.56), rgba(10, 10, 15, 0.72)),
+    radial-gradient(circle at top, rgba(255, 159, 74, 0.12), transparent 28%);
+}
+
+.home-view__inner {
+  position: relative;
+  z-index: 2;
+  width: min(100%, 388px);
   margin: 0 auto;
-  padding: 16px 16px 110px;
+  padding: 22px 20px 56px;
 }
 
 .control-deck,
 .filter-drawer,
 .state-card,
 .load-more-card {
-  background: rgba(61, 52, 119, 0.9);
+  background: rgba(61, 52, 119, 0.84);
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(10px);
 }
 
 .control-deck {
   position: sticky;
-  top: 14px;
-  z-index: 30;
+  top: 18px;
+  z-index: 20;
   display: grid;
-  gap: 12px;
-  padding: 14px;
-  margin-bottom: 14px;
-  backdrop-filter: blur(12px);
+  gap: 10px;
+  padding: 12px;
+  margin-bottom: 16px;
 }
 
 .control-deck__search {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-}
-
-.control-deck__stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.stat-tile {
-  display: grid;
-  gap: 6px;
-  padding: 10px;
-  background: rgba(81, 67, 162, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.stat-tile span,
-.stat-tile strong {
-  margin: 0;
-}
-
-.stat-tile span {
-  color: rgba(190, 183, 214, 0.8);
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.stat-tile strong {
-  color: var(--ink);
-  font-family: var(--font-display);
-  font-size: 1.1rem;
 }
 
 .control-deck__bar {
@@ -654,16 +600,16 @@ onBeforeUnmount(() => {
 .sort-box span,
 .filter-drawer span {
   color: rgba(190, 183, 214, 0.84);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .filter-drawer {
   display: grid;
-  gap: 14px;
-  padding: 14px;
-  margin-bottom: 14px;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 16px;
 }
 
 .filter-drawer__grid,
@@ -682,14 +628,14 @@ onBeforeUnmount(() => {
 
 .filter-drawer__footer p {
   margin: 0;
-  color: rgba(190, 183, 214, 0.84);
-  font-size: 0.76rem;
-  line-height: 1.55;
+  color: rgba(190, 183, 214, 0.82);
+  font-size: 0.74rem;
+  line-height: 1.5;
 }
 
 .list-section {
   display: grid;
-  gap: 18px;
+  gap: 20px;
 }
 
 .state-card,
@@ -709,55 +655,15 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 10px;
   justify-items: center;
-  background: rgba(81, 67, 162, 0.64);
+  background: rgba(81, 67, 162, 0.58);
 }
 
 .load-more-card p {
   margin: 0;
   color: rgba(190, 183, 214, 0.86);
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-}
-
-.bottom-dock {
-  position: fixed;
-  left: 50%;
-  bottom: 0;
-  z-index: 40;
-  transform: translateX(-50%);
-  width: min(100%, 430px);
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
-  background: rgba(63, 53, 121, 0.96);
-  border-top: 1px solid rgba(255, 159, 74, 0.32);
-  backdrop-filter: blur(14px);
-}
-
-.bottom-dock__item {
-  display: grid;
-  gap: 4px;
-  justify-items: center;
-  padding: 8px 0;
-  border: 0;
-  background: transparent;
-  color: rgba(190, 183, 214, 0.88);
-  cursor: pointer;
-  font-family: var(--font-display);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.bottom-dock__item--active {
-  color: var(--accent);
-}
-
-.bottom-dock__icon {
-  font-size: 1rem;
-  line-height: 1;
 }
 
 .panel-fade-enter-active,
@@ -769,12 +675,5 @@ onBeforeUnmount(() => {
 .panel-fade-leave-to {
   opacity: 0;
   transform: translateY(-8px);
-}
-
-@media (max-width: 720px) {
-  .filter-drawer__grid,
-  .filter-drawer__ranges {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 </style>

@@ -69,7 +69,9 @@ onBeforeUnmount(() => {
 .lazy-cover {
   position: relative;
   overflow: hidden;
-  min-height: 118px;
+  width: 100%;
+  min-height: 0;
+  aspect-ratio: 1 / 1;
   border-radius: 2px;
   border: 3px solid var(--accent);
   background:
@@ -93,7 +95,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 720px) {
   .lazy-cover {
-    min-height: 112px;
+    aspect-ratio: 1 / 1;
   }
 }
 </style>
