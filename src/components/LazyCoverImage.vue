@@ -69,18 +69,20 @@ onBeforeUnmount(() => {
 .lazy-cover {
   position: relative;
   overflow: hidden;
-  min-height: 148px;
-  border-radius: 26px;
+  min-height: 118px;
+  border-radius: 2px;
+  border: 3px solid var(--accent);
   background:
-    radial-gradient(circle at top, rgba(191, 87, 0, 0.34), transparent 55%),
-    linear-gradient(160deg, #131923, #2f3445);
+    radial-gradient(circle at top, rgba(255, 159, 74, 0.34), transparent 55%),
+    linear-gradient(160deg, #161122, #31285d);
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-  font-size: 1.7rem;
+  font-size: 1.5rem;
   font-weight: 800;
   letter-spacing: 0.08em;
+  box-shadow: 0 0 14px rgba(255, 159, 74, 0.24);
 }
 
 .lazy-cover img {
@@ -91,7 +93,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 720px) {
   .lazy-cover {
-    min-height: 180px;
+    min-height: 112px;
   }
 }
 </style>

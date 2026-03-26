@@ -40,12 +40,12 @@ const rangeFieldMap = {
 } as const
 
 const sortOptions: Array<{ label: string; value: SortKey }> = [
-  { label: 'Default order', value: 'default' },
-  { label: 'Title order', value: 'title' },
-  { label: 'Artist order', value: 'artist' },
-  { label: 'Version order', value: 'version' },
-  { label: 'BPM order', value: 'bpm' },
-  { label: 'Difficulty order', value: 'difficulty' },
+  { label: 'Default', value: 'default' },
+  { label: 'Title', value: 'title' },
+  { label: 'Artist', value: 'artist' },
+  { label: 'Version', value: 'version' },
+  { label: 'BPM', value: 'bpm' },
+  { label: 'Difficulty', value: 'difficulty' },
 ]
 
 function createUniqueOptions(songsList: SongViewModel[], field: 'version' | 'type' | 'genre') {
@@ -90,6 +90,23 @@ const hasActiveFilters = computed(() => {
     filters.bassMin !== '' ||
     filters.bassMax !== ''
   )
+})
+
+const activeFilterCount = computed(() => {
+  return [
+    filters.versionKey,
+    filters.typeKey,
+    filters.genreKey,
+    filters.classic !== 'all' ? filters.classic : '',
+    filters.remaster !== 'all' ? filters.remaster : '',
+    filters.long !== 'all' ? filters.long : '',
+    filters.guitarMin,
+    filters.guitarMax,
+    filters.drumMin,
+    filters.drumMax,
+    filters.bassMin,
+    filters.bassMax,
+  ].filter(Boolean).length
 })
 
 function matchesToggle(value: boolean, filterValue: ToggleFilterValue) {
@@ -298,7 +315,7 @@ function setupLoadMoreObserver() {
     },
     {
       root: null,
-      rootMargin: '280px 0px',
+      rootMargin: '260px 0px',
       threshold: 0.01,
     },
   )
@@ -325,6 +342,16 @@ function clearAllConditions() {
   searchQuery.value = ''
   resetFilters()
   sortKey.value = 'default'
+}
+
+function toggleFilters() {
+  showFilters.value = !showFilters.value
+}
+
+function scrollToTop() {
+  if (typeof window !== 'undefined') {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 }
 
 onMounted(async () => {
@@ -355,171 +382,150 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="home-view">
-    <div class="hero-panel">
-      <div class="hero-panel__copy">
-        <p class="hero-panel__eyebrow">M32 catalog / phase one foundation</p>
-        <h1>Build the query flow first, then enrich the data surface.</h1>
-        <p class="hero-panel__body">
-          This first slice follows the manual: searchable list page, filter drawer, result stats,
-          sorting controls, and a dedicated song detail page backed by normalized JSON data.
-        </p>
-      </div>
-      <div class="hero-panel__stats">
-        <article class="stat-card">
-          <p>Catalog songs</p>
-          <strong>{{ songs.length || '--' }}</strong>
-        </article>
-        <article class="stat-card">
-          <p>Current result</p>
-          <strong>{{ filteredSongs.length || '0' }}</strong>
-        </article>
-        <article class="stat-card">
-          <p>Sort mode</p>
-          <strong>{{ sortOptions.find((option) => option.value === sortKey)?.label }}</strong>
-        </article>
-      </div>
-    </div>
-
-    <section class="control-panel">
-      <div class="search-row">
-        <label class="search-field">
-          <span>Search title / artist / music ID</span>
-          <input
-            v-model="searchQuery"
-            type="search"
-            placeholder="Onion man / 2987 / ELIZABETH"
-          />
-        </label>
-
-        <div class="search-row__actions">
-          <button class="action-button action-button--muted" type="button" @click="showFilters = !showFilters">
-            {{ showFilters ? 'Hide filters' : 'Show filters' }}
-          </button>
-          <button class="action-button action-button--ghost" type="button" @click="clearAllConditions">
-            Reset all
-          </button>
-        </div>
+    <section class="control-deck">
+      <div class="control-deck__search">
+        <input
+          v-model="searchQuery"
+          type="search"
+          placeholder="Search title / artist / music ID"
+        />
+        <button class="action-button action-button--muted" type="button" @click="toggleFilters">
+          {{ showFilters ? 'Hide filters' : 'Show filters' }}
+        </button>
       </div>
 
-      <transition name="panel-fade">
-        <div v-if="showFilters" class="filter-panel">
-          <div class="filter-grid">
-            <label>
-              <span>Debut version</span>
-              <select v-model="filters.versionKey">
-                <option value="">All versions</option>
-                <option v-for="option in versionOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
+      <div class="control-deck__stats">
+        <article class="stat-tile">
+          <span>Shown</span>
+          <strong>{{ visibleSongs.length }}</strong>
+        </article>
+        <article class="stat-tile">
+          <span>Matched</span>
+          <strong>{{ filteredSongs.length }}</strong>
+        </article>
+        <article class="stat-tile">
+          <span>Filters</span>
+          <strong>{{ activeFilterCount }}</strong>
+        </article>
+      </div>
 
-            <label>
-              <span>Type</span>
-              <select v-model="filters.typeKey">
-                <option value="">All types</option>
-                <option v-for="option in typeOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-
-            <label>
-              <span>Genre</span>
-              <select v-model="filters.genreKey">
-                <option value="">All genres</option>
-                <option v-for="option in genreOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-
-            <label>
-              <span>Classic flag</span>
-              <select v-model="filters.classic">
-                <option value="all">All</option>
-                <option value="yes">Classic only</option>
-                <option value="no">Exclude classic</option>
-              </select>
-            </label>
-
-            <label>
-              <span>Remaster flag</span>
-              <select v-model="filters.remaster">
-                <option value="all">All</option>
-                <option value="yes">Remaster only</option>
-                <option value="no">Exclude remaster</option>
-              </select>
-            </label>
-
-            <label>
-              <span>Long flag</span>
-              <select v-model="filters.long">
-                <option value="all">All</option>
-                <option value="yes">Long only</option>
-                <option value="no">Exclude long</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="range-grid">
-            <label>
-              <span>Guitar max difficulty min</span>
-              <input v-model="filters.guitarMin" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Guitar max difficulty max</span>
-              <input v-model="filters.guitarMax" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Drum max difficulty min</span>
-              <input v-model="filters.drumMin" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Drum max difficulty max</span>
-              <input v-model="filters.drumMax" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Bass max difficulty min</span>
-              <input v-model="filters.bassMin" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Bass max difficulty max</span>
-              <input v-model="filters.bassMax" type="number" min="0" max="15" step="0.01" />
-            </label>
-          </div>
-
-          <div class="filter-footer">
-            <p>Difficulty filters currently target each instrument's highest available chart.</p>
-            <button class="action-button action-button--ghost" type="button" @click="resetFilters">
-              Clear filters only
-            </button>
-          </div>
-        </div>
-      </transition>
-
-      <div class="result-bar">
-        <div class="result-bar__summary">
-          <p>Result count</p>
-          <strong>{{ visibleSongs.length }} shown / {{ filteredSongs.length }} matched / {{ songs.length }} total</strong>
-        </div>
-
-        <label class="result-bar__sort">
-          <span>Sort order</span>
+      <div class="control-deck__bar">
+        <label class="sort-box">
+          <span>Sort</span>
           <select v-model="sortKey">
             <option v-for="option in sortOptions" :key="option.value" :value="option.value">
               {{ option.label }}
             </option>
           </select>
         </label>
+        <button class="action-button action-button--ghost" type="button" @click="clearAllConditions">
+          Reset all
+        </button>
       </div>
     </section>
 
-    <section v-if="loading" class="state-panel">
+    <transition name="panel-fade">
+      <section v-if="showFilters" class="filter-drawer">
+        <div class="filter-drawer__grid">
+          <label>
+            <span>Version</span>
+            <select v-model="filters.versionKey">
+              <option value="">All versions</option>
+              <option v-for="option in versionOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+
+          <label>
+            <span>Type</span>
+            <select v-model="filters.typeKey">
+              <option value="">All types</option>
+              <option v-for="option in typeOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+
+          <label>
+            <span>Genre</span>
+            <select v-model="filters.genreKey">
+              <option value="">All genres</option>
+              <option v-for="option in genreOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+
+          <label>
+            <span>Classic</span>
+            <select v-model="filters.classic">
+              <option value="all">All</option>
+              <option value="yes">Only classic</option>
+              <option value="no">Exclude classic</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Remaster</span>
+            <select v-model="filters.remaster">
+              <option value="all">All</option>
+              <option value="yes">Only remaster</option>
+              <option value="no">Exclude remaster</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Long</span>
+            <select v-model="filters.long">
+              <option value="all">All</option>
+              <option value="yes">Only long</option>
+              <option value="no">Exclude long</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="filter-drawer__ranges">
+          <label>
+            <span>Guitar min</span>
+            <input v-model="filters.guitarMin" type="number" min="0" max="15" step="0.01" />
+          </label>
+          <label>
+            <span>Guitar max</span>
+            <input v-model="filters.guitarMax" type="number" min="0" max="15" step="0.01" />
+          </label>
+          <label>
+            <span>Drum min</span>
+            <input v-model="filters.drumMin" type="number" min="0" max="15" step="0.01" />
+          </label>
+          <label>
+            <span>Drum max</span>
+            <input v-model="filters.drumMax" type="number" min="0" max="15" step="0.01" />
+          </label>
+          <label>
+            <span>Bass min</span>
+            <input v-model="filters.bassMin" type="number" min="0" max="15" step="0.01" />
+          </label>
+          <label>
+            <span>Bass max</span>
+            <input v-model="filters.bassMax" type="number" min="0" max="15" step="0.01" />
+          </label>
+        </div>
+
+        <div class="filter-drawer__footer">
+          <p>Difficulty range uses each instrument's highest available chart.</p>
+          <button class="action-button action-button--ghost" type="button" @click="resetFilters">
+            Clear filters
+          </button>
+        </div>
+      </section>
+    </transition>
+
+    <section v-if="loading" class="state-card">
       Loading catalog data...
     </section>
 
-    <section v-else-if="errorMessage" class="state-panel state-panel--error">
+    <section v-else-if="errorMessage" class="state-card state-card--error">
       {{ errorMessage }}
     </section>
 
@@ -541,213 +547,217 @@ onBeforeUnmount(() => {
       <div
         v-if="hasMoreSongs"
         ref="loadMoreTrigger"
-        class="load-more-sentinel"
+        class="load-more-card"
       >
         <p>Scroll to load 20 more songs</p>
         <button class="action-button action-button--ghost" type="button" @click="loadMoreSongs">
-          Load more now
+          Load more
         </button>
       </div>
     </section>
+
+    <nav class="bottom-dock">
+      <button class="bottom-dock__item bottom-dock__item--active" type="button">
+        <span class="bottom-dock__icon">□</span>
+        <span>Library</span>
+      </button>
+      <button class="bottom-dock__item" type="button" @click="toggleFilters">
+        <span class="bottom-dock__icon">◇</span>
+        <span>Filters</span>
+      </button>
+      <button class="bottom-dock__item" type="button" @click="scrollToTop">
+        <span class="bottom-dock__icon">△</span>
+        <span>Top</span>
+      </button>
+    </nav>
   </section>
 </template>
 
 <style scoped>
 .home-view {
-  display: grid;
-  gap: 20px;
+  position: relative;
+  width: min(100%, 430px);
+  margin: 0 auto;
+  padding: 16px 16px 110px;
 }
 
-.hero-panel,
-.control-panel,
-.state-panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 32px;
+.control-deck,
+.filter-drawer,
+.state-card,
+.load-more-card {
+  background: rgba(61, 52, 119, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: var(--shadow-soft);
 }
 
-.hero-panel {
+.control-deck {
+  position: sticky;
+  top: 14px;
+  z-index: 30;
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.9fr);
-  gap: 18px;
-  padding: 24px;
-}
-
-.hero-panel__eyebrow,
-.hero-panel__body {
-  margin: 0;
-}
-
-.hero-panel__eyebrow {
-  color: var(--accent-strong);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.hero-panel h1 {
-  margin: 12px 0;
-  color: var(--ink);
-  font-size: clamp(2rem, 4vw, 3.2rem);
-  line-height: 0.98;
-  letter-spacing: -0.05em;
-}
-
-.hero-panel__body {
-  max-width: 52ch;
-  color: var(--muted);
-  line-height: 1.75;
-}
-
-.hero-panel__stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+  padding: 14px;
+  margin-bottom: 14px;
+  backdrop-filter: blur(12px);
 }
 
-.stat-card {
-  padding: 18px;
-  border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 241, 233, 0.98));
-  border: 1px solid rgba(31, 41, 55, 0.08);
-}
-
-.stat-card p,
-.stat-card strong {
-  margin: 0;
-}
-
-.stat-card p {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.stat-card strong {
-  display: block;
-  margin-top: 8px;
-  color: var(--ink);
-  font-size: 1.55rem;
-  line-height: 1.1;
-}
-
-.control-panel {
-  display: grid;
-  gap: 18px;
-  padding: 20px;
-}
-
-.search-row {
+.control-deck__search {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: end;
-}
-
-.search-row__actions {
-  display: flex;
   gap: 10px;
 }
 
-.search-field,
-.filter-grid label,
-.range-grid label,
-.result-bar__sort {
+.control-deck__stats {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.search-field span,
-.filter-grid span,
-.range-grid span,
-.result-bar__sort span {
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 700;
+.stat-tile {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  background: rgba(81, 67, 162, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.filter-panel {
-  display: grid;
-  gap: 18px;
-  padding-top: 4px;
+.stat-tile span,
+.stat-tile strong {
+  margin: 0;
 }
 
-.filter-grid,
-.range-grid {
+.stat-tile span {
+  color: rgba(190, 183, 214, 0.8);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stat-tile strong {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+}
+
+.control-deck__bar {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.sort-box,
+.filter-drawer label {
+  display: grid;
+  gap: 6px;
+}
+
+.sort-box span,
+.filter-drawer span {
+  color: rgba(190, 183, 214, 0.84);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.filter-drawer {
+  display: grid;
   gap: 14px;
+  padding: 14px;
+  margin-bottom: 14px;
 }
 
-.filter-footer {
+.filter-drawer__grid,
+.filter-drawer__ranges {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.filter-drawer__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
 }
 
-.filter-footer p {
+.filter-drawer__footer p {
   margin: 0;
-  color: var(--muted);
-  font-size: 0.88rem;
-}
-
-.result-bar {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 16px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(31, 41, 55, 0.08);
-}
-
-.result-bar__summary p,
-.result-bar__summary strong {
-  margin: 0;
-}
-
-.result-bar__summary p {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.result-bar__summary strong {
-  display: block;
-  margin-top: 4px;
-  color: var(--ink);
-  font-size: 1.12rem;
+  color: rgba(190, 183, 214, 0.84);
+  font-size: 0.76rem;
+  line-height: 1.55;
 }
 
 .list-section {
   display: grid;
-  gap: 16px;
+  gap: 18px;
 }
 
-.load-more-sentinel {
-  display: grid;
-  gap: 12px;
-  justify-items: center;
-  padding: 22px;
-  border-radius: 24px;
-  border: 1px dashed rgba(31, 41, 55, 0.14);
-  background: rgba(255, 255, 255, 0.5);
+.state-card,
+.load-more-card {
+  padding: 18px;
 }
 
-.load-more-sentinel p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.92rem;
-}
-
-.state-panel {
-  padding: 28px;
+.state-card {
   color: var(--ink);
 }
 
-.state-panel--error {
-  color: var(--danger);
+.state-card--error {
+  color: #ff9eb0;
+}
+
+.load-more-card {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  background: rgba(81, 67, 162, 0.64);
+}
+
+.load-more-card p {
+  margin: 0;
+  color: rgba(190, 183, 214, 0.86);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.bottom-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  z-index: 40;
+  transform: translateX(-50%);
+  width: min(100%, 430px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: rgba(63, 53, 121, 0.96);
+  border-top: 1px solid rgba(255, 159, 74, 0.32);
+  backdrop-filter: blur(14px);
+}
+
+.bottom-dock__item {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: rgba(190, 183, 214, 0.88);
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bottom-dock__item--active {
+  color: var(--accent);
+}
+
+.bottom-dock__icon {
+  font-size: 1rem;
+  line-height: 1;
 }
 
 .panel-fade-enter-active,
@@ -758,44 +768,13 @@ onBeforeUnmount(() => {
 .panel-fade-enter-from,
 .panel-fade-leave-to {
   opacity: 0;
-  transform: translateY(-6px);
-}
-
-@media (max-width: 960px) {
-  .hero-panel,
-  .search-row,
-  .filter-grid,
-  .range-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .hero-panel__stats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .search-row__actions,
-  .filter-footer,
-  .result-bar {
-    flex-direction: column;
-    align-items: stretch;
-  }
+  transform: translateY(-8px);
 }
 
 @media (max-width: 720px) {
-  .hero-panel,
-  .control-panel,
-  .state-panel {
-    border-radius: 24px;
-  }
-
-  .hero-panel,
-  .control-panel,
-  .state-panel {
-    padding: 18px;
-  }
-
-  .hero-panel__stats {
-    grid-template-columns: 1fr;
+  .filter-drawer__grid,
+  .filter-drawer__ranges {
+    grid-template-columns: 1fr 1fr;
   }
 }
 </style>

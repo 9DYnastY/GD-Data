@@ -1,16 +1,27 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import DifficultyGrid from './DifficultyGrid.vue'
 import LazyCoverImage from './LazyCoverImage.vue'
 import type { SongViewModel } from '../types/song'
 
-defineProps<{
+const props = defineProps<{
   song: SongViewModel
 }>()
+
+const highlightTags = computed(() => {
+  const tags = [...props.song.tags]
+
+  if (tags.length === 0) {
+    tags.push(props.song.versionLabel)
+  }
+
+  return tags.slice(0, 2)
+})
 </script>
 
 <template>
-  <article class="song-card">
+  <RouterLink class="song-card" :to="`/song/${song.musicId}`">
     <div class="song-card__hero">
       <LazyCoverImage
         class="song-card__cover"
@@ -19,116 +30,114 @@ defineProps<{
         :src="song.heroImageUrl"
       />
 
-      <div class="song-card__summary">
-        <div class="song-card__heading">
-          <div>
-            <p class="song-card__id">ID {{ song.musicId }}</p>
-            <h2>{{ song.displayTitle }}</h2>
-            <p class="song-card__artist">{{ song.displayArtist }}</p>
-          </div>
-          <RouterLink class="action-button" :to="`/song/${song.musicId}`">
-            Details
-          </RouterLink>
+      <div class="song-card__copy">
+        <p class="song-card__artist">{{ song.displayArtist }}</p>
+        <h2>{{ song.displayTitle }}</h2>
+        <div class="song-card__badges">
+          <span v-for="tag in highlightTags" :key="tag" class="tag-chip">{{ tag }}</span>
         </div>
-
-        <div class="song-card__meta-row">
-          <span class="meta-pill">{{ song.versionLabel }}</span>
-          <span class="meta-pill">{{ song.genreLabel }}</span>
-          <span class="meta-pill">BPM {{ song.bpmDisplay }}</span>
-          <span class="meta-pill">{{ song.lengthLabel }}</span>
-        </div>
-
-        <div v-if="song.tags.length" class="song-card__tag-row">
-          <span v-for="tag in song.tags" :key="tag" class="tag-chip">{{ tag }}</span>
+        <div class="song-card__meta">
+          <span>{{ song.genreLabel }}</span>
+          <span>BPM {{ song.bpmDisplay }}</span>
+          <span>ID {{ song.musicId }}</span>
         </div>
       </div>
     </div>
 
     <DifficultyGrid :compact="true" :instruments="song.instruments" />
-  </article>
+  </RouterLink>
 </template>
 
 <style scoped>
 .song-card {
   display: grid;
-  gap: 18px;
-  padding: 20px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 32px;
+  gap: 14px;
+  padding: 16px;
+  background: rgba(81, 67, 162, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: var(--shadow-soft);
+  text-decoration: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.song-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 159, 74, 0.14);
+  pointer-events: none;
 }
 
 .song-card__hero {
   display: grid;
-  grid-template-columns: 148px minmax(0, 1fr);
-  gap: 18px;
-}
-
-.song-card__cover {
-  min-width: 0;
-}
-
-.song-card__summary {
-  display: grid;
-  gap: 14px;
-}
-
-.song-card__heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  grid-template-columns: 118px minmax(0, 1fr);
   gap: 16px;
 }
 
-.song-card__id,
-.song-card__artist {
+.song-card__copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.song-card__artist,
+.song-card__meta {
   margin: 0;
 }
 
-.song-card__id {
-  color: var(--muted);
-  font-size: 0.76rem;
+.song-card__artist {
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-.song-card__heading h2 {
-  margin: 8px 0 6px;
+.song-card h2 {
+  margin: 8px 0 10px;
   color: var(--ink);
-  font-size: clamp(1.34rem, 2vw, 1.7rem);
-  line-height: 1.06;
+  font-size: clamp(1.45rem, 4vw, 1.9rem);
+  line-height: 1;
+  text-transform: uppercase;
 }
 
-.song-card__artist {
-  color: var(--muted);
-  font-size: 0.98rem;
+.song-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.song-card__meta-row,
-.song-card__tag-row {
+.song-card__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  margin-top: 12px;
+  color: rgba(244, 239, 255, 0.76);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 @media (max-width: 720px) {
   .song-card {
-    padding: 18px;
-    border-radius: 24px;
+    padding: 14px;
   }
 
   .song-card__hero {
-    grid-template-columns: 1fr;
+    grid-template-columns: 110px minmax(0, 1fr);
+    gap: 14px;
   }
 
-  .song-card__heading {
-    flex-direction: column;
+  .song-card h2 {
+    font-size: 1.52rem;
   }
 
-  .song-card :deep(.action-button) {
-    width: 100%;
+  .song-card__meta {
+    gap: 8px;
+    font-size: 0.68rem;
   }
 }
 </style>

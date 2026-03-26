@@ -32,10 +32,9 @@ defineEmits<{
 
 <style scoped>
 .empty-state {
-  padding: 32px;
-  border-radius: 28px;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(249, 238, 226, 0.92));
-  border: 1px dashed rgba(191, 87, 0, 0.28);
+  padding: 28px;
+  background: rgba(81, 67, 162, 0.74);
+  border: 1px dashed rgba(255, 159, 74, 0.28);
   display: grid;
   gap: 12px;
   text-align: center;
