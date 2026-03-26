@@ -18,6 +18,7 @@ const searchQuery = ref(
   typeof window === 'undefined' ? '' : window.localStorage.getItem(SEARCH_STORAGE_KEY) ?? '',
 )
 const sortKey = ref<SortKey>('default')
+const sortDirection = ref<'asc' | 'desc'>('asc')
 const filters = reactive<SongFilters>({
   versionKey: '',
   typeKey: '',
@@ -203,39 +204,49 @@ const filteredSongs = computed(() => {
   })
 
   return nextSongs.slice().sort((left, right) => {
+    let result = 0
+
     switch (sortKey.value) {
       case 'title':
-        return (
+        result = (
           left.sortKeys.titleAsciiOrder - right.sortKeys.titleAsciiOrder ||
           compareText(left.displayTitle, right.displayTitle)
         )
+        break
       case 'artist':
-        return (
+        result = (
           left.sortKeys.artistAsciiOrder - right.sortKeys.artistAsciiOrder ||
           compareText(left.displayArtist, right.displayArtist)
         )
+        break
       case 'version': {
         const leftVersion = parseVersionKey(left.versionKey)
         const rightVersion = parseVersionKey(right.versionKey)
-        return (
+        result = (
           (leftVersion[0] ?? Number.MAX_SAFE_INTEGER) - (rightVersion[0] ?? Number.MAX_SAFE_INTEGER) ||
           (leftVersion[1] ?? Number.MAX_SAFE_INTEGER) - (rightVersion[1] ?? Number.MAX_SAFE_INTEGER) ||
           compareText(left.displayTitle, right.displayTitle)
         )
+        break
       }
       case 'bpm':
-        return (
+        result = (
           (left.bpmPrimary ?? Number.MAX_SAFE_INTEGER) - (right.bpmPrimary ?? Number.MAX_SAFE_INTEGER) ||
           compareText(left.displayTitle, right.displayTitle)
         )
+        break
       case 'difficulty':
-        return (
+        result = (
           (right.maxDifficulty ?? -1) - (left.maxDifficulty ?? -1) ||
           compareText(left.displayTitle, right.displayTitle)
         )
+        break
       default:
-        return left.sortKeys.defaultOrder - right.sortKeys.defaultOrder
+        result = left.sortKeys.defaultOrder - right.sortKeys.defaultOrder
+        break
     }
+
+    return sortDirection.value === 'asc' ? result : result * -1
   })
 })
 
@@ -365,7 +376,7 @@ onBeforeUnmount(() => {
     <div class="home-view__overlay"></div>
 
     <div class="home-view__inner">
-      <section class="control-deck">
+      <section class="control-deck" :class="{ 'control-deck--expanded': showFilters }">
         <div class="control-deck__search">
           <input
             v-model="searchQuery"
@@ -376,23 +387,29 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div class="control-deck__bar">
-          <label class="sort-box">
-            <span>Sort</span>
-            <select v-model="sortKey">
-              <option v-for="option in sortOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <button class="action-button action-button--ghost" type="button" @click="clearAllConditions">
-            Reset all
-          </button>
-        </div>
       </section>
 
       <transition name="panel-fade">
         <section v-if="showFilters" class="filter-drawer">
+          <div class="filter-drawer__sort">
+            <label class="sort-box">
+              <span>Sort</span>
+              <select v-model="sortKey">
+                <option v-for="option in sortOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
+
+            <label class="sort-box">
+              <span>Direction</span>
+              <select v-model="sortDirection">
+                <option value="asc">Asc</option>
+                <option value="desc">Desc</option>
+              </select>
+            </label>
+          </div>
+
           <div class="filter-drawer__grid">
             <label>
               <span>Version</span>
@@ -481,9 +498,14 @@ onBeforeUnmount(() => {
 
           <div class="filter-drawer__footer">
             <p>Difficulty range uses each instrument's highest available chart.</p>
-            <button class="action-button action-button--ghost" type="button" @click="resetFilters">
-              Clear filters
-            </button>
+            <div class="filter-drawer__footer-actions">
+              <button class="action-button action-button--ghost" type="button" @click="resetFilters">
+                Clear filters
+              </button>
+              <button class="action-button action-button--muted" type="button" @click="showFilters = false">
+                Hide panel
+              </button>
+            </div>
           </div>
         </section>
       </transition>
@@ -558,7 +580,7 @@ onBeforeUnmount(() => {
   z-index: 2;
   width: min(100%, 388px);
   margin: 0 auto;
-  padding: 22px 20px 56px;
+  padding: 0 16px 56px;
 }
 
 .control-deck,
@@ -573,12 +595,12 @@ onBeforeUnmount(() => {
 
 .control-deck {
   position: sticky;
-  top: 18px;
+  top: 0;
   z-index: 20;
   display: grid;
-  gap: 10px;
+  gap: 0;
   padding: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .control-deck__search {
@@ -586,9 +608,7 @@ onBeforeUnmount(() => {
 }
 
 .control-deck__bar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  display: none;
 }
 
 .sort-box,
@@ -610,6 +630,18 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 12px;
   margin-bottom: 16px;
+  margin-top: -1px;
+  border-top: 0;
+}
+
+.control-deck--expanded {
+  border-bottom: 0;
+}
+
+.filter-drawer__sort {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  gap: 10px;
 }
 
 .filter-drawer__grid,
@@ -626,6 +658,11 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
+.filter-drawer__footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .filter-drawer__footer p {
   margin: 0;
   color: rgba(190, 183, 214, 0.82);
@@ -636,6 +673,9 @@ onBeforeUnmount(() => {
 .list-section {
   display: grid;
   gap: 20px;
+  width: min(100%, 352px);
+  margin: 0 auto;
+  padding-top: 16px;
 }
 
 .state-card,
@@ -675,5 +715,13 @@ onBeforeUnmount(() => {
 .panel-fade-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+@media (max-width: 720px) {
+  .filter-drawer__sort,
+  .filter-drawer__grid,
+  .filter-drawer__ranges {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 </style>
