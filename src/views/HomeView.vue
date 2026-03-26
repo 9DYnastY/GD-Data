@@ -379,6 +379,7 @@ onBeforeUnmount(() => {
       <section class="control-deck" :class="{ 'control-deck--expanded': showFilters }">
         <div class="control-deck__search">
           <input
+            class="control-deck__input"
             v-model="searchQuery"
             type="search"
             placeholder="Search title / artist / music ID"
@@ -597,14 +598,33 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 20;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
   display: grid;
   gap: 0;
   padding: 12px;
   margin-bottom: 0;
+  border-left: 0;
+  border-right: 0;
 }
 
 .control-deck__search {
   display: grid;
+}
+
+.control-deck__input {
+  min-height: 52px;
+  border: 0;
+  border-radius: 0;
+  background: rgba(61, 52, 119, 0.02);
+  box-shadow: none;
+  padding: 0 4px;
+}
+
+.control-deck__input:focus {
+  border: 0;
+  box-shadow: none;
+  background: rgba(61, 52, 119, 0.02);
 }
 
 .control-deck__bar {
@@ -628,10 +648,14 @@ onBeforeUnmount(() => {
 .filter-drawer {
   display: grid;
   gap: 12px;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
   padding: 12px;
   margin-bottom: 16px;
   margin-top: -1px;
   border-top: 0;
+  border-left: 0;
+  border-right: 0;
 }
 
 .control-deck--expanded {
