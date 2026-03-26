@@ -9,15 +9,7 @@ const props = defineProps<{
   song: SongViewModel
 }>()
 
-const highlightTags = computed(() => {
-  const tags = [...props.song.tags]
-
-  if (tags.length === 0) {
-    tags.push(props.song.versionLabel)
-  }
-
-  return tags.slice(0, 2)
-})
+const highlightTags = computed(() => [props.song.versionLabel])
 </script>
 
 <template>
