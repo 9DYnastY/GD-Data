@@ -549,7 +549,7 @@ onBeforeUnmount(() => {
   z-index: 2;
   width: min(100%, 403px);
   margin: 0 auto;
-  padding: 149px 14px 116px;
+  padding: 161px 14px 116px;
 }
 
 .top-shell,
@@ -712,7 +712,7 @@ onBeforeUnmount(() => {
 
 .list-section {
   display: grid;
-  gap: 16px;
+  gap: 36px;
   width: min(100%, 375px);
   margin: 0 auto;
 }

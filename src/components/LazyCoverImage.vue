@@ -72,19 +72,19 @@ onBeforeUnmount(() => {
   width: 100%;
   min-height: 0;
   aspect-ratio: 1 / 1;
-  border-radius: 2px;
-  border: 3px solid var(--accent);
+  border-radius: 10px;
+  border: 0;
   background:
-    radial-gradient(circle at top, rgba(255, 159, 74, 0.34), transparent 55%),
+    linear-gradient(180deg, rgba(18, 14, 33, 0.94), rgba(37, 26, 69, 0.94)),
     linear-gradient(160deg, #161122, #31285d);
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-  font-size: 1.5rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  box-shadow: 0 0 14px rgba(255, 159, 74, 0.24);
+  font-family: var(--font-figma-title);
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .lazy-cover img {

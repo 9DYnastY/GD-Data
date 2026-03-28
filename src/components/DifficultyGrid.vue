@@ -52,8 +52,8 @@ function levelClass(level: LevelKey) {
       :class="levelClass(level.level)"
     >
       <div class="compact-grid__header">
-        <span class="compact-grid__instrument">{{ compactInstrument.label }}</span>
-        <span class="compact-grid__level">{{ level.label }}</span>
+        <span class="compact-grid__instrument">{{ compactInstrument.label.toUpperCase() }}</span>
+        <span class="compact-grid__level">{{ level.label.toUpperCase() }}</span>
       </div>
       <div class="compact-grid__value">{{ level.available ? level.difficultyText : '--' }}</div>
     </div>
@@ -108,26 +108,23 @@ function levelClass(level: LevelKey) {
 <style scoped>
 .compact-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 14px;
+  grid-template-columns: repeat(2, 82px);
+  grid-auto-rows: 45px;
+  gap: 15px 25px;
+  justify-content: start;
 }
 
 .compact-grid__cell {
   position: relative;
-  min-height: 58px;
-  padding: 4px 8px 8px;
-  border: 1px solid rgba(26, 12, 79, 0.55);
-  background: rgba(32, 32, 32, 0.88);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  width: 82px;
+  height: 45px;
+  padding: 1px 1px 0 2px;
+  border: 0;
+  background-color: #191919;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
   overflow: hidden;
-}
-
-.compact-grid__cell::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto;
-  height: 14px;
-  opacity: 0.96;
 }
 
 .compact-grid__header,
@@ -140,51 +137,81 @@ function levelClass(level: LevelKey) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
+  width: 78px;
+  height: 8px;
   color: rgba(245, 244, 250, 0.92);
-  font-family: var(--font-display);
-  font-size: 0.54rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-family: var(--font-figma-ui);
+  font-size: 8px;
+  font-weight: 400;
+  letter-spacing: -0.08em;
+  line-height: 20px;
   text-transform: uppercase;
 }
 
 .compact-grid__instrument {
-  color: rgba(223, 223, 223, 0.72);
+  color: #747474;
+  white-space: nowrap;
 }
 
 .compact-grid__level {
+  color: rgba(27, 22, 29, 0.85);
   text-align: right;
+  font-size: 11px;
+  letter-spacing: -0.03em;
+  line-height: 20px;
+  white-space: nowrap;
 }
 
 .compact-grid__value {
-  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  margin-top: 3px;
   color: #ffffff;
-  font-family: var(--font-display);
-  font-size: 2.15rem;
-  font-weight: 500;
-  letter-spacing: -0.06em;
-  line-height: 0.92;
+  font-family: var(--font-figma-ui);
+  font-size: 40px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 20px;
+  font-feature-settings: 'dlig' 1, 'lnum' 1, 'pnum' 1;
 }
 
 .difficulty-cell--master::before {
-  background: linear-gradient(90deg, rgba(91, 31, 113, 0.95), rgba(223, 0, 255, 0.95));
+  content: none;
 }
 
 .difficulty-cell--extreme::before {
-  background: linear-gradient(90deg, rgba(87, 21, 21, 0.95), rgba(255, 0, 52, 0.95));
+  content: none;
 }
 
 .difficulty-cell--advanced::before {
-  background: linear-gradient(90deg, rgba(84, 63, 0, 0.95), rgba(255, 222, 0, 0.95));
+  content: none;
 }
 
 .difficulty-cell--basic::before {
-  background: linear-gradient(90deg, rgba(14, 54, 116, 0.95), rgba(47, 152, 255, 0.95));
+  content: none;
 }
 
-.compact-grid__cell--empty::before {
-  background: linear-gradient(90deg, rgba(67, 67, 67, 0.95), rgba(128, 128, 128, 0.95));
+.difficulty-cell--master {
+  background-image: url('/figma-card/difficulty-master.png');
+}
+
+.difficulty-cell--extreme {
+  background-image: url('/figma-card/difficulty-extreme.png');
+}
+
+.difficulty-cell--advanced {
+  background-image: url('/figma-card/difficulty-advanced.png');
+}
+
+.difficulty-cell--basic {
+  background-image: url('/figma-card/difficulty-basic.png');
+}
+
+.compact-grid__cell--empty {
+  background-image: none;
+  border: 1px solid rgba(122, 122, 122, 0.72);
 }
 
 .detail-grid {
@@ -265,19 +292,6 @@ function levelClass(level: LevelKey) {
 }
 
 @media (max-width: 720px) {
-  .compact-grid {
-    gap: 10px 12px;
-  }
-
-  .compact-grid__cell {
-    min-height: 54px;
-    padding: 4px 7px 7px;
-  }
-
-  .compact-grid__value {
-    font-size: 1.95rem;
-  }
-
   .detail-grid__levels {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
