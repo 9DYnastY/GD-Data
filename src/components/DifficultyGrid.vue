@@ -62,6 +62,7 @@ function levelClass(level: LevelKey) {
       v-for="level in compactLevels"
       :key="`${compactInstrument.key}-${level.level}`"
       class="compact-grid__cell"
+      :class="levelClass(level.level)"
     >
       <svg class="compact-grid__frame" viewBox="0 0 82 45" preserveAspectRatio="none" aria-hidden="true">
         <rect width="82" height="45" :fill="levelAccent(level.level)" />
@@ -156,11 +157,11 @@ function levelClass(level: LevelKey) {
 }
 
 .compact-grid__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  width: 78px;
+  position: absolute;
+  left: 2px;
+  right: 0;
+  top: 1px;
+  width: 80px;
   height: 8px;
   font-family: var(--font-figma-ui);
   font-size: 8px;
@@ -171,11 +172,17 @@ function levelClass(level: LevelKey) {
 }
 
 .compact-grid__instrument {
+  position: absolute;
+  left: 0;
+  top: 0;
   color: #747474;
   white-space: nowrap;
 }
 
 .compact-grid__level {
+  position: absolute;
+  right: 0;
+  top: 0;
   color: rgba(27, 22, 29, 0.85);
   text-align: right;
   font-size: 11px;
@@ -185,10 +192,13 @@ function levelClass(level: LevelKey) {
 }
 
 .compact-grid__value {
+  position: absolute;
+  left: 2px;
+  right: 0;
+  top: 11px;
+  bottom: 3px;
   display: flex;
   align-items: center;
-  min-height: 32px;
-  margin-top: 3px;
   color: #ffffff;
   font-family: var(--font-figma-ui);
   font-size: 40px;
