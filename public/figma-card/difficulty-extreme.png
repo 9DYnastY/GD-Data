@@ -1,8 +1,0 @@
-<svg preserveAspectRatio="none" width="100%" height="100%" overflow="visible" style="display: block;" viewBox="0 0 82 45" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g id="background">
-<rect id="Rectangle 8" width="82" height="45" fill="var(--fill-0, #E10035)"/>
-<rect id="Rectangle 8_2" x="1" y="1" width="81" height="43" fill="var(--fill-0, #262527)"/>
-<path id="Polygon 1" d="M82 39L82 44H77L82 39Z" fill="var(--fill-0, #E10035)"/>
-<path id="Subtract" d="M81.9875 9.94561L28.1655 9.97668L24.5908 0.834199L81.9848 0.838578L81.9875 9.94561Z" fill="var(--fill-0, #E10035)"/>
-</g>
-</svg>

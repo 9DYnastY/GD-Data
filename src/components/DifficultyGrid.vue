@@ -29,6 +29,19 @@ const compactLevels = computed(() => {
   return compactInstrument.value ? orderedLevels(compactInstrument.value.levels) : []
 })
 
+function levelAccent(level: LevelKey) {
+  switch (level) {
+    case 'master':
+      return '#C700CD'
+    case 'extreme':
+      return '#FF003B'
+    case 'advanced':
+      return '#D5B400'
+    default:
+      return '#4C89FF'
+  }
+}
+
 function levelClass(level: LevelKey) {
   switch (level) {
     case 'master':
@@ -49,8 +62,16 @@ function levelClass(level: LevelKey) {
       v-for="level in compactLevels"
       :key="`${compactInstrument.key}-${level.level}`"
       class="compact-grid__cell"
-      :class="levelClass(level.level)"
     >
+      <svg class="compact-grid__frame" viewBox="0 0 82 45" preserveAspectRatio="none" aria-hidden="true">
+        <rect width="82" height="45" :fill="levelAccent(level.level)" />
+        <rect x="1" y="1" width="81" height="43" fill="#262527" />
+        <path d="M82 39L82 44H77L82 39Z" :fill="levelAccent(level.level)" />
+        <path
+          d="M81.9874 9.9456L28.1655 9.97668L24.5908 0.834198L81.9848 0.838577L81.9874 9.9456Z"
+          :fill="levelAccent(level.level)"
+        />
+      </svg>
       <div class="compact-grid__header">
         <span class="compact-grid__instrument">{{ compactInstrument.label.toUpperCase() }}</span>
         <span class="compact-grid__level">{{ level.label.toUpperCase() }}</span>
@@ -118,13 +139,14 @@ function levelClass(level: LevelKey) {
   position: relative;
   width: 82px;
   height: 45px;
-  padding: 1px 1px 0 2px;
-  border: 0;
-  background-color: #191919;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 100% 100%;
   overflow: hidden;
+}
+
+.compact-grid__frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .compact-grid__header,
@@ -140,7 +162,6 @@ function levelClass(level: LevelKey) {
   gap: 6px;
   width: 78px;
   height: 8px;
-  color: rgba(245, 244, 250, 0.92);
   font-family: var(--font-figma-ui);
   font-size: 8px;
   font-weight: 400;
@@ -177,40 +198,8 @@ function levelClass(level: LevelKey) {
   font-feature-settings: 'dlig' 1, 'lnum' 1, 'pnum' 1;
 }
 
-.difficulty-cell--master::before {
-  content: none;
-}
-
-.difficulty-cell--extreme::before {
-  content: none;
-}
-
-.difficulty-cell--advanced::before {
-  content: none;
-}
-
-.difficulty-cell--basic::before {
-  content: none;
-}
-
-.difficulty-cell--master {
-  background-image: url('/figma-card/difficulty-master.png');
-}
-
-.difficulty-cell--extreme {
-  background-image: url('/figma-card/difficulty-extreme.png');
-}
-
-.difficulty-cell--advanced {
-  background-image: url('/figma-card/difficulty-advanced.png');
-}
-
-.difficulty-cell--basic {
-  background-image: url('/figma-card/difficulty-basic.png');
-}
-
 .compact-grid__cell--empty {
-  background-image: none;
+  background: #262527;
   border: 1px solid rgba(122, 122, 122, 0.72);
 }
 
