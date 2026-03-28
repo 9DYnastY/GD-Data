@@ -54,6 +54,10 @@ function levelClass(level: LevelKey) {
       return 'difficulty-cell--basic'
   }
 }
+
+function displayDifficultyText(level: DifficultySlot) {
+  return level.available ? level.difficultyText : '-.--'
+}
 </script>
 
 <template>
@@ -76,7 +80,7 @@ function levelClass(level: LevelKey) {
       <svg class="compact-grid__labels" viewBox="0 0 82 45" preserveAspectRatio="none" aria-hidden="true">
         <text
           x="2"
-          y="8.1"
+          y="10"
           class="compact-grid__instrument-svg"
           textLength="21"
           lengthAdjust="spacingAndGlyphs"
@@ -84,8 +88,8 @@ function levelClass(level: LevelKey) {
           {{ compactInstrument.label.toUpperCase() }}
         </text>
         <text
-          x="80"
-          y="8.35"
+          x="81"
+          y="11.5"
           class="compact-grid__level-svg"
           text-anchor="end"
           lengthAdjust="spacingAndGlyphs"
@@ -93,7 +97,9 @@ function levelClass(level: LevelKey) {
           {{ level.label.toUpperCase() }}
         </text>
       </svg>
-      <div class="compact-grid__value">{{ level.available ? level.difficultyText : '--' }}</div>
+      <div class="compact-grid__value" :class="{ 'compact-grid__value--missing': !level.available }">
+        {{ displayDifficultyText(level) }}
+      </div>
     </div>
   </div>
 
@@ -107,7 +113,7 @@ function levelClass(level: LevelKey) {
         <span class="compact-grid__instrument">Chart</span>
         <span class="compact-grid__level">N/A</span>
       </div>
-      <div class="compact-grid__value">--</div>
+      <div class="compact-grid__value compact-grid__value--missing">-.--</div>
     </div>
   </div>
 
@@ -133,7 +139,7 @@ function levelClass(level: LevelKey) {
           :class="levelClass(level.level)"
         >
           <p class="detail-grid__label">{{ level.label }}</p>
-          <p class="detail-grid__value">{{ level.available ? level.difficultyText : '--' }}</p>
+          <p class="detail-grid__value">{{ displayDifficultyText(level) }}</p>
           <p v-if="showNoteCount" class="detail-grid__notes">
             Notes {{ level.noteCountText }}
           </p>
@@ -216,6 +222,12 @@ function levelClass(level: LevelKey) {
   letter-spacing: -0.02em;
   line-height: 20px;
   font-feature-settings: 'dlig' 1, 'lnum' 1, 'pnum' 1;
+}
+
+.compact-grid__value--missing {
+  left: 0;
+  right: 0;
+  justify-content: center;
 }
 
 .compact-grid__cell--empty {
