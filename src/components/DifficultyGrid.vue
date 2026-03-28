@@ -73,10 +73,26 @@ function levelClass(level: LevelKey) {
           :fill="levelAccent(level.level)"
         />
       </svg>
-      <div class="compact-grid__header">
-        <span class="compact-grid__instrument">{{ compactInstrument.label.toUpperCase() }}</span>
-        <span class="compact-grid__level">{{ level.label.toUpperCase() }}</span>
-      </div>
+      <svg class="compact-grid__labels" viewBox="0 0 82 45" preserveAspectRatio="none" aria-hidden="true">
+        <text
+          x="2"
+          y="8.1"
+          class="compact-grid__instrument-svg"
+          textLength="21"
+          lengthAdjust="spacingAndGlyphs"
+        >
+          {{ compactInstrument.label.toUpperCase() }}
+        </text>
+        <text
+          x="80"
+          y="8.35"
+          class="compact-grid__level-svg"
+          text-anchor="end"
+          lengthAdjust="spacingAndGlyphs"
+        >
+          {{ level.label.toUpperCase() }}
+        </text>
+      </svg>
       <div class="compact-grid__value">{{ level.available ? level.difficultyText : '--' }}</div>
     </div>
   </div>
@@ -150,45 +166,39 @@ function levelClass(level: LevelKey) {
   height: 100%;
 }
 
-.compact-grid__header,
+.compact-grid__labels,
 .compact-grid__value {
   position: relative;
   z-index: 1;
 }
 
-.compact-grid__header {
+.compact-grid__labels {
   position: absolute;
-  left: 2px;
-  right: 0;
-  top: 1px;
-  width: 80px;
-  height: 8px;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.compact-grid__instrument-svg,
+.compact-grid__level-svg {
   font-family: var(--font-figma-ui);
-  font-size: 8px;
   font-weight: 400;
-  letter-spacing: -0.08em;
-  line-height: 20px;
+  dominant-baseline: text-after-edge;
   text-transform: uppercase;
 }
 
-.compact-grid__instrument {
-  position: absolute;
-  left: 0;
-  top: 0;
-  color: #747474;
-  white-space: nowrap;
+.compact-grid__instrument-svg {
+  fill: #747474;
+  font-size: 8px;
+  letter-spacing: -0.64px;
 }
 
-.compact-grid__level {
-  position: absolute;
-  right: 0;
-  top: 0;
-  color: rgba(27, 22, 29, 0.85);
-  text-align: right;
+.compact-grid__level-svg {
+  fill: rgba(27, 22, 29, 0.85);
   font-size: 11px;
-  letter-spacing: -0.03em;
-  line-height: 20px;
-  white-space: nowrap;
+  letter-spacing: -0.33px;
 }
 
 .compact-grid__value {
