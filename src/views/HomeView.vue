@@ -1,147 +1,243 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import DifficultyRangeSlider from '../components/DifficultyRangeSlider.vue'
 import EmptyState from '../components/EmptyState.vue'
 import SongCard from '../components/SongCard.vue'
 import { loadSongCatalog } from '../lib/song-catalog'
-import type { InstrumentKey, SongFilters, SongViewModel, SortKey } from '../types/song'
+import type { InstrumentKey, SongViewModel } from '../types/song'
+
+type SearchSortOption =
+  | 'id-asc'
+  | 'id-desc'
+  | 'title-asc'
+  | 'title-desc'
+  | 'artist-asc'
+  | 'artist-desc'
+  | 'difficulty-asc'
+  | 'difficulty-desc'
+
+type SearchMenu = 'version' | 'sort' | null
+
+type SearchFilters = {
+  versionKey: string
+  difficultyMin: number
+  difficultyMax: number
+}
 
 const SEARCH_STORAGE_KEY = 'gddata:last-search'
 const PAGE_SIZE = 20
+const FULL_DIFFICULTY_MIN = 0
+const FULL_DIFFICULTY_MAX = 99
+const DIFFICULTY_STOPS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99]
 const INSTRUMENT_ORDER: InstrumentKey[] = ['drum', 'guitar', 'bass']
 const INSTRUMENT_LABELS: Record<InstrumentKey, string> = {
   drum: 'Drum',
   guitar: 'Guitar',
   bass: 'Bass',
 }
+const GF_VERSION_MAP: Record<number, string> = {
+  0: 'GF1st',
+  1: 'GF2nd',
+  2: 'GF3rd',
+  3: 'GF4th',
+  4: 'GF5th',
+  5: 'GF6th',
+  6: 'GF7th',
+  7: 'GF8th',
+  8: 'GF9th',
+  9: 'GF10th',
+  10: 'GF11th',
+  11: 'V',
+  12: 'V2',
+  13: 'V3',
+  14: 'V4',
+  15: 'V5',
+  16: 'V6',
+  17: 'XG',
+  18: 'XG2',
+  19: 'XG3',
+  20: 'GITADORA',
+  21: 'OverDrive',
+  22: 'Tri-Boost',
+  23: 'Tri-Boost Re:EVOLVE',
+  24: 'Matixx',
+  25: 'EXCHAIN',
+  26: 'NEX+AGE',
+  27: 'HIGH-VOLTAGE',
+  28: 'FUZZ-UP',
+  29: 'GALAXY WAVE',
+  30: 'GALAXY WAVE DELTA',
+}
+const DM_VERSION_MAP: Record<number, string> = {
+  0: 'DM1st',
+  1: 'DM2nd',
+  2: 'DM3rd',
+  3: 'DM4th',
+  4: 'DM5th',
+  5: 'DM6th',
+  6: 'DM7th',
+  7: 'DM8th',
+  8: 'DM9th',
+  9: 'DM10th',
+  10: 'V',
+  11: 'V2',
+  12: 'V3',
+  13: 'V4',
+  14: 'V5',
+  15: 'V6',
+  16: 'XG',
+  17: 'XG2',
+  18: 'XG3',
+  19: 'GITADORA',
+  20: 'OverDrive',
+  21: 'Tri-Boost',
+  22: 'Tri-Boost Re:EVOLVE',
+  23: 'Matixx',
+  24: 'EXCHAIN',
+  25: 'NEX+AGE',
+  26: 'HIGH-VOLTAGE',
+  27: 'FUZZ-UP',
+  28: 'GALAXY WAVE',
+  29: 'GALAXY WAVE DELTA',
+}
 
 const songs = ref<SongViewModel[]>([])
 const loading = ref(true)
 const errorMessage = ref('')
 const showFilters = ref(false)
+const openMenu = ref<SearchMenu>(null)
 const visibleCount = ref(PAGE_SIZE)
 const loadMoreTrigger = ref<HTMLElement | null>(null)
+const topShellRef = ref<HTMLElement | null>(null)
+const searchInputRef = ref<HTMLInputElement | null>(null)
 const searchQuery = ref(
   typeof window === 'undefined' ? '' : window.localStorage.getItem(SEARCH_STORAGE_KEY) ?? '',
 )
-const sortKey = ref<SortKey>('default')
-const sortDirection = ref<'asc' | 'desc'>('asc')
+const sortOption = ref<SearchSortOption>('id-asc')
 const selectedInstrument = ref<InstrumentKey>('drum')
-const filters = reactive<SongFilters>({
+const filters = reactive<SearchFilters>({
   versionKey: '',
-  guitarMin: '',
-  guitarMax: '',
-  drumMin: '',
-  drumMax: '',
-  bassMin: '',
-  bassMax: '',
+  difficultyMin: FULL_DIFFICULTY_MIN,
+  difficultyMax: FULL_DIFFICULTY_MAX,
 })
 
-const rangeFieldMap = {
-  guitar: ['guitarMin', 'guitarMax'],
-  drum: ['drumMin', 'drumMax'],
-  bass: ['bassMin', 'bassMax'],
-} as const
-
-const sortOptions: Array<{ label: string; value: SortKey }> = [
-  { label: 'Default', value: 'default' },
-  { label: 'Title', value: 'title' },
-  { label: 'Artist', value: 'artist' },
-  { label: 'Version', value: 'version' },
-  { label: 'BPM', value: 'bpm' },
-  { label: 'Difficulty', value: 'difficulty' },
+const sortOptions: Array<{ label: string; value: SearchSortOption }> = [
+  { label: 'ID-升序', value: 'id-asc' },
+  { label: 'ID-降序', value: 'id-desc' },
+  { label: '标题-升序', value: 'title-asc' },
+  { label: '标题-降序', value: 'title-desc' },
+  { label: '艺术家-升序', value: 'artist-asc' },
+  { label: '艺术家-降序', value: 'artist-desc' },
+  { label: 'MAS难度-升序', value: 'difficulty-asc' },
+  { label: 'MAS难度-降序', value: 'difficulty-desc' },
 ]
 
-function createUniqueOptions(songsList: SongViewModel[], field: 'version' | 'type' | 'genre') {
-  const uniqueMap = new Map<string, string>()
-
-  songsList.forEach((song) => {
-    if (field === 'version') {
-      uniqueMap.set(song.versionKey, song.versionLabel)
-      return
-    }
-
-    if (field === 'type') {
-      uniqueMap.set(song.typeKey, song.typeLabel)
-      return
-    }
-
-    uniqueMap.set(song.genreKey, song.genreLabel)
-  })
-
-  return Array.from(uniqueMap.entries())
-    .map(([value, label]) => ({ value, label }))
-    .sort((left, right) => left.label.localeCompare(right.label))
-}
-
-const versionOptions = computed(() => createUniqueOptions(songs.value, 'version'))
-const selectedInstrumentLabel = computed(() => INSTRUMENT_LABELS[selectedInstrument.value])
 let loadMoreObserver: IntersectionObserver | null = null
 
-const hasActiveFilters = computed(() => {
-  return (
-    filters.versionKey !== '' ||
-    filters.guitarMin !== '' ||
-    filters.guitarMax !== '' ||
-    filters.drumMin !== '' ||
-    filters.drumMax !== '' ||
-    filters.bassMin !== '' ||
-    filters.bassMax !== ''
-  )
-})
+function parseVersionKey(versionKey: string) {
+  const [gfRaw, dmRaw] = versionKey.split('-')
+  const gfIndex = Number(gfRaw)
+  const dmIndex = Number(dmRaw)
 
-function parseRangeValue(value: string): number | null {
-  if (!value.trim()) {
-    return null
+  return {
+    gfIndex: Number.isFinite(gfIndex) ? gfIndex : -1,
+    dmIndex: Number.isFinite(dmIndex) ? dmIndex : -1,
   }
-
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
 }
 
-function getInstrumentMax(song: SongViewModel, instrumentKey: InstrumentKey) {
-  return song.instruments.find((instrument) => instrument.key === instrumentKey)?.maxDifficulty ?? null
+function resolveInstrumentVersionLabel(versionKey: string, instrument: InstrumentKey) {
+  const { gfIndex, dmIndex } = parseVersionKey(versionKey)
+
+  if (instrument === 'drum') {
+    return DM_VERSION_MAP[dmIndex] ?? 'Unknown'
+  }
+
+  return GF_VERSION_MAP[gfIndex] ?? 'Unknown'
 }
 
-function matchesInstrumentRange(song: SongViewModel, instrumentKey: InstrumentKey) {
-  const [minField, maxField] = rangeFieldMap[instrumentKey]
-  const minValue = parseRangeValue(filters[minField])
-  const maxValue = parseRangeValue(filters[maxField])
-
-  if (minValue === null && maxValue === null) {
-    return true
-  }
-
-  const instrumentDifficulty = getInstrumentMax(song, instrumentKey)
-
-  if (instrumentDifficulty === null) {
-    return false
-  }
-
-  if (minValue !== null && instrumentDifficulty < minValue) {
-    return false
-  }
-
-  if (maxValue !== null && instrumentDifficulty > maxValue) {
-    return false
-  }
-
-  return true
-}
-
-function getSelectedInstrumentMax(song: SongViewModel) {
-  return getInstrumentMax(song, selectedInstrument.value)
-}
-
-function parseVersionKey(versionKey: string): number[] {
-  return versionKey
-    .split('-')
-    .map((item) => Number(item))
-    .filter((item) => Number.isFinite(item))
+function resolveInstrumentVersionOrder(versionKey: string, instrument: InstrumentKey) {
+  const { gfIndex, dmIndex } = parseVersionKey(versionKey)
+  return instrument === 'drum' ? dmIndex : gfIndex
 }
 
 function compareText(left: string, right: string) {
   return left.localeCompare(right)
 }
+
+function getInstrumentDifficulty(song: SongViewModel, instrumentKey: InstrumentKey) {
+  return song.instruments.find((instrument) => instrument.key === instrumentKey) ?? null
+}
+
+function getSelectedInstrumentMaster(song: SongViewModel) {
+  return (
+    getInstrumentDifficulty(song, selectedInstrument.value)?.levels.find((level) => level.level === 'master')
+      ?.difficulty ?? null
+  )
+}
+
+function isFullDifficultyRange() {
+  return (
+    filters.difficultyMin === FULL_DIFFICULTY_MIN &&
+    filters.difficultyMax === FULL_DIFFICULTY_MAX
+  )
+}
+
+function matchesSelectedDifficultyRange(song: SongViewModel) {
+  if (isFullDifficultyRange()) {
+    return true
+  }
+
+  const selectedDifficulty = getInstrumentDifficulty(song, selectedInstrument.value)
+
+  if (!selectedDifficulty) {
+    return false
+  }
+
+  const minValue = filters.difficultyMin / 10
+  const maxValue = filters.difficultyMax / 10
+
+  return selectedDifficulty.levels.some((level) => {
+    return level.available && level.difficulty !== null && level.difficulty >= minValue && level.difficulty <= maxValue
+  })
+}
+
+const selectedInstrumentLabel = computed(() => INSTRUMENT_LABELS[selectedInstrument.value])
+
+const versionOptions = computed(() => {
+  const uniqueVersions = new Map<string, { value: string; label: string; order: number }>()
+
+  songs.value.forEach((song) => {
+    if (uniqueVersions.has(song.versionKey)) {
+      return
+    }
+
+    uniqueVersions.set(song.versionKey, {
+      value: song.versionKey,
+      label: resolveInstrumentVersionLabel(song.versionKey, selectedInstrument.value),
+      order: resolveInstrumentVersionOrder(song.versionKey, selectedInstrument.value),
+    })
+  })
+
+  return Array.from(uniqueVersions.values()).sort((left, right) => {
+    return right.order - left.order || compareText(left.label, right.label)
+  })
+})
+
+const hasActiveFilters = computed(() => {
+  return filters.versionKey !== '' || !isFullDifficultyRange()
+})
+
+const selectedVersionLabel = computed(() => {
+  if (!filters.versionKey) {
+    return '版本'
+  }
+
+  return versionOptions.value.find((option) => option.value === filters.versionKey)?.label ?? '版本'
+})
+
+const selectedSortLabel = computed(() => {
+  return sortOptions.find((option) => option.value === sortOption.value)?.label ?? '排序'
+})
 
 const filteredSongs = computed(() => {
   const normalizedQuery = searchQuery.value.trim().toLowerCase()
@@ -160,15 +256,7 @@ const filteredSongs = computed(() => {
       return false
     }
 
-    if (!matchesInstrumentRange(song, 'guitar')) {
-      return false
-    }
-
-    if (!matchesInstrumentRange(song, 'drum')) {
-      return false
-    }
-
-    if (!matchesInstrumentRange(song, 'bass')) {
+    if (!matchesSelectedDifficultyRange(song)) {
       return false
     }
 
@@ -176,49 +264,44 @@ const filteredSongs = computed(() => {
   })
 
   return nextSongs.slice().sort((left, right) => {
-    let result = 0
-
-    switch (sortKey.value) {
-      case 'title':
-        result = (
+    switch (sortOption.value) {
+      case 'id-asc':
+        return left.musicId - right.musicId
+      case 'id-desc':
+        return right.musicId - left.musicId
+      case 'title-asc':
+        return (
           left.sortKeys.titleAsciiOrder - right.sortKeys.titleAsciiOrder ||
           compareText(left.displayTitle, right.displayTitle)
         )
-        break
-      case 'artist':
-        result = (
+      case 'title-desc':
+        return (
+          right.sortKeys.titleAsciiOrder - left.sortKeys.titleAsciiOrder ||
+          compareText(left.displayTitle, right.displayTitle)
+        )
+      case 'artist-asc':
+        return (
           left.sortKeys.artistAsciiOrder - right.sortKeys.artistAsciiOrder ||
           compareText(left.displayArtist, right.displayArtist)
         )
-        break
-      case 'version': {
-        const leftVersion = parseVersionKey(left.versionKey)
-        const rightVersion = parseVersionKey(right.versionKey)
-        result = (
-          (leftVersion[0] ?? Number.MAX_SAFE_INTEGER) - (rightVersion[0] ?? Number.MAX_SAFE_INTEGER) ||
-          (leftVersion[1] ?? Number.MAX_SAFE_INTEGER) - (rightVersion[1] ?? Number.MAX_SAFE_INTEGER) ||
+      case 'artist-desc':
+        return (
+          right.sortKeys.artistAsciiOrder - left.sortKeys.artistAsciiOrder ||
+          compareText(left.displayArtist, right.displayArtist)
+        )
+      case 'difficulty-asc':
+        return (
+          compareMasterDifficulty(left, right, 'asc') ||
           compareText(left.displayTitle, right.displayTitle)
         )
-        break
-      }
-      case 'bpm':
-        result = (
-          (left.bpmPrimary ?? Number.MAX_SAFE_INTEGER) - (right.bpmPrimary ?? Number.MAX_SAFE_INTEGER) ||
+      case 'difficulty-desc':
+        return (
+          compareMasterDifficulty(left, right, 'desc') ||
           compareText(left.displayTitle, right.displayTitle)
         )
-        break
-      case 'difficulty':
-        result = (
-          (getSelectedInstrumentMax(right) ?? -1) - (getSelectedInstrumentMax(left) ?? -1) ||
-          compareText(left.displayTitle, right.displayTitle)
-        )
-        break
       default:
-        result = left.sortKeys.defaultOrder - right.sortKeys.defaultOrder
-        break
+        return 0
     }
-
-    return sortDirection.value === 'asc' ? result : result * -1
   })
 })
 
@@ -234,16 +317,11 @@ watch(searchQuery, (value) => {
 watch(
   [
     searchQuery,
-    sortKey,
-    sortDirection,
+    sortOption,
     selectedInstrument,
     () => filters.versionKey,
-    () => filters.guitarMin,
-    () => filters.guitarMax,
-    () => filters.drumMin,
-    () => filters.drumMax,
-    () => filters.bassMin,
-    () => filters.bassMax,
+    () => filters.difficultyMin,
+    () => filters.difficultyMax,
   ],
   () => {
     visibleCount.value = PAGE_SIZE
@@ -288,23 +366,37 @@ function setupLoadMoreObserver() {
 
 function resetFilters() {
   filters.versionKey = ''
-  filters.guitarMin = ''
-  filters.guitarMax = ''
-  filters.drumMin = ''
-  filters.drumMax = ''
-  filters.bassMin = ''
-  filters.bassMax = ''
+  filters.difficultyMin = FULL_DIFFICULTY_MIN
+  filters.difficultyMax = FULL_DIFFICULTY_MAX
 }
 
 function clearAllConditions() {
   searchQuery.value = ''
+  sortOption.value = 'id-asc'
   resetFilters()
-  sortKey.value = 'default'
-  sortDirection.value = 'asc'
+  showFilters.value = false
+  openMenu.value = null
 }
 
 function openFilters() {
   showFilters.value = true
+}
+
+function closeFilters() {
+  showFilters.value = false
+  openMenu.value = null
+}
+
+function toggleFilters() {
+  showFilters.value = !showFilters.value
+  if (!showFilters.value) {
+    openMenu.value = null
+  }
+}
+
+function submitSearch() {
+  closeFilters()
+  searchInputRef.value?.blur()
 }
 
 function cycleInstrument() {
@@ -312,7 +404,39 @@ function cycleInstrument() {
   selectedInstrument.value = INSTRUMENT_ORDER[(currentIndex + 1) % INSTRUMENT_ORDER.length]
 }
 
+function toggleMenu(menu: Exclude<SearchMenu, null>) {
+  openMenu.value = openMenu.value === menu ? null : menu
+}
+
+function selectVersion(value: string) {
+  filters.versionKey = value
+  openMenu.value = null
+}
+
+function selectSort(value: SearchSortOption) {
+  sortOption.value = value
+  openMenu.value = null
+}
+
+function handleDocumentPointerDown(event: PointerEvent) {
+  if (!showFilters.value) {
+    return
+  }
+
+  const target = event.target
+
+  if (!topShellRef.value || !(target instanceof Node)) {
+    return
+  }
+
+  if (!topShellRef.value.contains(target)) {
+    closeFilters()
+  }
+}
+
 onMounted(async () => {
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
+
   try {
     songs.value = await loadSongCatalog()
   } catch (error) {
@@ -334,8 +458,34 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
   loadMoreObserver?.disconnect()
 })
+
+function compareMasterDifficulty(
+  left: SongViewModel,
+  right: SongViewModel,
+  direction: 'asc' | 'desc',
+) {
+  const leftDifficulty = getSelectedInstrumentMaster(left)
+  const rightDifficulty = getSelectedInstrumentMaster(right)
+
+  if (leftDifficulty === null && rightDifficulty === null) {
+    return 0
+  }
+
+  if (leftDifficulty === null) {
+    return 1
+  }
+
+  if (rightDifficulty === null) {
+    return -1
+  }
+
+  return direction === 'asc'
+    ? leftDifficulty - rightDifficulty
+    : rightDifficulty - leftDifficulty
+}
 </script>
 
 <template>
@@ -345,96 +495,120 @@ onBeforeUnmount(() => {
     </video>
     <div class="home-view__overlay"></div>
 
-    <header class="top-shell" :class="{ 'top-shell--expanded': showFilters }">
-      <div class="top-shell__bar">
-        <label class="search-shell">
-          <input
-            class="search-shell__input"
-            v-model="searchQuery"
-            type="search"
-            placeholder="Search title / artist / music ID"
-            @click="openFilters"
-            @focus="openFilters"
-          />
-          <button class="search-shell__button" type="button" @click="openFilters" aria-label="Open filters">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="11" cy="11" r="6.5"></circle>
-              <path d="M16 16L21 21"></path>
-            </svg>
-          </button>
-        </label>
+    <header ref="topShellRef" class="top-shell">
+      <div class="top-shell__purple">
+        <div class="top-shell__bar">
+          <label class="search-shell">
+            <input
+              ref="searchInputRef"
+              v-model="searchQuery"
+              class="search-shell__input"
+              type="search"
+              placeholder="搜索曲名 / 艺术家 / ID"
+              @click="openFilters"
+              @focus="openFilters"
+              @keydown.enter.prevent="submitSearch"
+            />
+            <button
+              class="search-shell__button"
+              type="button"
+              :aria-label="showFilters ? '收起筛选面板' : '展开筛选面板'"
+              @click="toggleFilters"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="6.5"></circle>
+                <path d="M16 16L21 21"></path>
+              </svg>
+            </button>
+          </label>
+        </div>
       </div>
 
       <transition name="panel-fade">
         <section v-if="showFilters" class="filter-drawer">
-          <div class="filter-drawer__sort">
-            <label class="sort-box">
-              <span>Sort</span>
-              <select v-model="sortKey">
-                <option v-for="option in sortOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-
-            <label class="sort-box">
-              <span>Direction</span>
-              <select v-model="sortDirection">
-                <option value="asc">Asc</option>
-                <option value="desc">Desc</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="filter-drawer__grid filter-drawer__grid--single">
-            <label>
-              <span>Version</span>
-              <select v-model="filters.versionKey">
-                <option value="">All versions</option>
-                <option v-for="option in versionOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-          </div>
-
-          <div class="filter-drawer__ranges">
-            <label>
-              <span>Guitar min</span>
-              <input v-model="filters.guitarMin" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Guitar max</span>
-              <input v-model="filters.guitarMax" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Drum min</span>
-              <input v-model="filters.drumMin" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Drum max</span>
-              <input v-model="filters.drumMax" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Bass min</span>
-              <input v-model="filters.bassMin" type="number" min="0" max="15" step="0.01" />
-            </label>
-            <label>
-              <span>Bass max</span>
-              <input v-model="filters.bassMax" type="number" min="0" max="15" step="0.01" />
-            </label>
-          </div>
-
-          <div class="filter-drawer__footer">
-            <p>Difficulty filters still apply across all three instruments.</p>
-            <div class="filter-drawer__footer-actions">
-              <button class="action-button action-button--ghost" type="button" @click="resetFilters">
-                Clear filters
+          <div class="filter-drawer__controls">
+            <div class="pill-menu">
+              <button
+                class="pill-menu__button"
+                type="button"
+                aria-label="版本筛选"
+                :aria-expanded="openMenu === 'version'"
+                @click.stop="toggleMenu('version')"
+              >
+                <span class="pill-menu__label">{{ selectedVersionLabel }}</span>
+                <span class="pill-menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 18 18">
+                    <path d="M4 7L9 12L14 7"></path>
+                  </svg>
+                </span>
               </button>
-              <button class="action-button action-button--muted" type="button" @click="showFilters = false">
-                Hide panel
-              </button>
+
+              <transition name="menu-fade">
+                <div v-if="openMenu === 'version'" class="pill-menu__sheet">
+                  <button
+                    class="pill-menu__option"
+                    :class="{ 'pill-menu__option--active': filters.versionKey === '' }"
+                    type="button"
+                    @click="selectVersion('')"
+                  >
+                    All versions
+                  </button>
+                  <button
+                    v-for="option in versionOptions"
+                    :key="option.value"
+                    class="pill-menu__option"
+                    :class="{ 'pill-menu__option--active': filters.versionKey === option.value }"
+                    type="button"
+                    @click="selectVersion(option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+              </transition>
             </div>
+
+            <div class="pill-menu">
+              <button
+                class="pill-menu__button"
+                type="button"
+                aria-label="排序方式"
+                :aria-expanded="openMenu === 'sort'"
+                @click.stop="toggleMenu('sort')"
+              >
+                <span class="pill-menu__label">{{ selectedSortLabel }}</span>
+                <span class="pill-menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 18 18">
+                    <path d="M4 7L9 12L14 7"></path>
+                  </svg>
+                </span>
+              </button>
+
+              <transition name="menu-fade">
+                <div v-if="openMenu === 'sort'" class="pill-menu__sheet">
+                  <button
+                    v-for="option in sortOptions"
+                    :key="option.value"
+                    class="pill-menu__option"
+                    :class="{ 'pill-menu__option--active': sortOption === option.value }"
+                    type="button"
+                    @click="selectSort(option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+              </transition>
+            </div>
+          </div>
+
+          <div class="filter-drawer__slider">
+            <DifficultyRangeSlider
+              :stops="DIFFICULTY_STOPS"
+              :min-value="filters.difficultyMin"
+              :max-value="filters.difficultyMax"
+              label="LEVEL"
+              @update:min-value="filters.difficultyMin = $event"
+              @update:max-value="filters.difficultyMax = $event"
+            />
           </div>
         </section>
       </transition>
@@ -491,29 +665,6 @@ onBeforeUnmount(() => {
         <path d="M13 5L20 12L13 19"></path>
       </svg>
     </button>
-
-    <nav class="bottom-nav" aria-label="Primary">
-      <button class="bottom-nav__item bottom-nav__item--active" type="button">
-        <span class="bottom-nav__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24">
-            <path d="M4 7H20"></path>
-            <path d="M7 12H17"></path>
-            <path d="M9 17H15"></path>
-          </svg>
-        </span>
-        <span>Song List</span>
-      </button>
-      <button class="bottom-nav__item" type="button">
-        <span class="bottom-nav__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24">
-            <path d="M10 18V7L18 5V16"></path>
-            <circle cx="8" cy="18" r="2"></circle>
-            <circle cx="16" cy="16" r="2"></circle>
-          </svg>
-        </span>
-        <span>Skill</span>
-      </button>
-    </nav>
   </section>
 </template>
 
@@ -549,12 +700,11 @@ onBeforeUnmount(() => {
   z-index: 2;
   width: min(100%, 403px);
   margin: 0 auto;
-  padding: 161px 14px 116px;
+  padding: 156px 14px 36px;
 }
 
 .top-shell,
-.load-more-card,
-.bottom-nav {
+.load-more-card {
   backdrop-filter: blur(10px);
 }
 
@@ -564,18 +714,17 @@ onBeforeUnmount(() => {
   left: 0;
   right: 0;
   z-index: 30;
+  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
+}
+
+.top-shell__purple {
   background: #4b3b76;
-  box-shadow: 0 8px 24px rgba(48, 36, 87, 0.26);
 }
 
 .top-shell__bar {
   width: min(100%, 402px);
   margin: 0 auto;
-  padding: 62px 11px 14px;
-}
-
-.top-shell--expanded {
-  padding-bottom: 10px;
+  padding: 63px 11px 15px;
 }
 
 .search-shell {
@@ -583,20 +732,22 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   min-height: 47px;
-  padding-left: 18px;
+  padding-left: 4px;
   border-radius: 28px;
   background: #ece6f0;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  overflow: hidden;
 }
 
 .search-shell__input {
   min-height: 47px;
-  padding: 0 10px 0 0;
+  padding: 4px 20px 4px 20px;
   border: 0;
   background: transparent;
   color: #49454f;
   box-shadow: none;
+  font-family: 'Roboto', var(--font-sans);
   font-size: 1rem;
+  letter-spacing: 0.03em;
 }
 
 .search-shell__input::placeholder {
@@ -617,15 +768,14 @@ onBeforeUnmount(() => {
   height: 48px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
   background: transparent;
   color: #49454f;
   cursor: pointer;
 }
 
 .search-shell__button svg,
-.bottom-nav__icon svg,
-.instrument-fab svg {
+.instrument-fab svg,
+.pill-menu__icon svg {
   width: 24px;
   height: 24px;
   fill: none;
@@ -635,79 +785,117 @@ onBeforeUnmount(() => {
   stroke-width: 2;
 }
 
-.sort-box,
-.filter-drawer label {
-  display: grid;
-  gap: 6px;
-}
-
-.sort-box span,
-.filter-drawer span {
-  color: rgba(74, 68, 89, 0.76);
-  font-size: 0.64rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .filter-drawer {
-  display: grid;
-  gap: 12px;
   width: min(100%, 402px);
   margin: 0 auto;
-  padding: 0 11px 12px;
+  padding: 16px 11px 18px;
+  background: #ffffff;
 }
 
-.filter-drawer__sort {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px;
-  gap: 10px;
-}
-
-.filter-drawer__grid,
-.filter-drawer__ranges {
+.filter-drawer__controls {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 16px 36px;
 }
 
-.filter-drawer__grid--single {
-  grid-template-columns: 1fr;
+.pill-menu {
+  position: relative;
+  z-index: 2;
 }
 
-.filter-drawer select,
-.filter-drawer input {
-  min-height: 42px;
-  border: 0;
-  border-radius: 12px;
-  background: rgba(236, 230, 240, 0.96);
-  color: #3f3b45;
-  box-shadow: inset 0 0 0 1px rgba(75, 59, 118, 0.16);
+.pill-menu__button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px 0 18px;
+  border: 1px solid #4f378a;
+  border-radius: 25px;
+  background: #ffffff;
+  color: #4f378a;
+  box-shadow: none;
+  font-family: 'Roboto', var(--font-sans);
+  font-size: 0.95rem;
+  cursor: pointer;
 }
 
-.filter-drawer select:focus,
-.filter-drawer input:focus {
+.pill-menu__button:focus-visible {
+  outline: none;
+  border-color: #4f378a;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(79, 55, 138, 0.12);
+}
+
+.pill-menu__label {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.pill-menu__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: #4f378a;
+}
+
+.pill-menu__icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.7;
+}
+
+.pill-menu__sheet {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  padding: 8px;
+  overflow-y: auto;
+  border: 1px solid rgba(79, 55, 138, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
   box-shadow:
-    inset 0 0 0 1px rgba(75, 59, 118, 0.28),
-    0 0 0 3px rgba(234, 221, 255, 0.16);
+    0 18px 40px rgba(43, 29, 85, 0.18),
+    0 6px 18px rgba(43, 29, 85, 0.1);
 }
 
-.filter-drawer__footer {
+.pill-menu__option {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #4f378a;
+  font-family: 'Roboto', var(--font-sans);
+  font-size: 0.92rem;
+  text-align: left;
+  cursor: pointer;
 }
 
-.filter-drawer__footer-actions {
-  display: flex;
-  gap: 8px;
+.pill-menu__option:hover {
+  background: rgba(232, 222, 248, 0.72);
 }
 
-.filter-drawer__footer p {
-  margin: 0;
-  color: rgba(236, 230, 240, 0.86);
-  font-size: 0.74rem;
-  line-height: 1.5;
+.pill-menu__option--active {
+  background: #e8def8;
+  color: #39256b;
+  font-weight: 500;
+}
+
+.filter-drawer__slider {
+  margin-top: 22px;
 }
 
 .list-section {
@@ -751,7 +939,7 @@ onBeforeUnmount(() => {
 .instrument-fab {
   position: fixed;
   right: 14px;
-  bottom: 86px;
+  bottom: 24px;
   z-index: 32;
   display: inline-grid;
   justify-items: center;
@@ -785,56 +973,9 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
-.bottom-nav {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 31;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: stretch;
-  min-height: 64px;
-  background: rgba(255, 255, 255, 0.95);
-  border-top: 1px solid rgba(102, 84, 166, 0.14);
-}
-
-.bottom-nav__item {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  padding: 6px 10px 8px;
-  border: 0;
-  background: transparent;
-  color: #49454f;
-  cursor: pointer;
-}
-
-.bottom-nav__item span:last-child {
-  font-size: 0.8rem;
-}
-
-.bottom-nav__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 56px;
-  height: 32px;
-  border-radius: 16px;
-}
-
-.bottom-nav__item--active {
-  color: #625b71;
-}
-
-.bottom-nav__item--active .bottom-nav__icon {
-  background: #e8def8;
-  color: #4a4459;
-}
-
 .panel-fade-enter-active,
 .panel-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
 .panel-fade-enter-from,
@@ -843,24 +984,25 @@ onBeforeUnmount(() => {
   transform: translateY(-8px);
 }
 
+.menu-fade-enter-active,
+.menu-fade-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
 @media (max-width: 720px) {
   .home-view__inner {
     padding-left: 14px;
     padding-right: 14px;
   }
 
-  .filter-drawer__sort,
-  .filter-drawer__ranges {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .filter-drawer__footer {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .filter-drawer__footer-actions {
-    justify-content: flex-end;
+  .filter-drawer__controls {
+    gap: 16px;
   }
 }
 </style>

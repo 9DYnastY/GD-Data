@@ -18,7 +18,7 @@ defineEmits<{
         Search term "{{ query }}" did not return any result in the current filtered set.
       </template>
       <template v-else>
-        The current filter combination is too narrow. Relax version, flags, or difficulty ranges.
+        The current filter combination is too narrow. Relax the version or difficulty range and try again.
       </template>
     </p>
     <button class="action-button" type="button" @click="$emit('reset')">
