@@ -7,6 +7,17 @@ const router = createRouter({
       path: '/',
       name: 'home',
       component: () => import('../views/HomeView.vue'),
+      meta: {
+        showBottomNav: true,
+      },
+    },
+    {
+      path: '/skill',
+      name: 'skill',
+      component: () => import('../views/SkillView.vue'),
+      meta: {
+        showBottomNav: true,
+      },
     },
     {
       path: '/song/:musicId',

@@ -939,7 +939,7 @@ function compareMasterDifficulty(
 .instrument-fab {
   position: fixed;
   right: 14px;
-  bottom: 24px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
   z-index: 32;
   display: inline-grid;
   justify-items: center;
