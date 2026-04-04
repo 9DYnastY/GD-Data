@@ -1,5 +1,10 @@
 import type { InstrumentKey, LevelKey, SongViewModel } from './song'
 
+export type BjmaniaScoreFamily = 'dm' | 'gf'
+export type BjmaniaScoreHotFilter = 'all' | 'hot' | 'other'
+export type BjmaniaScoreFilterKey = 'current' | 'skill' | 'deleted' | 'classic' | 'non-classic'
+export type BjmaniaScoreSortKey = 'skill' | 'rate' | 'difficulty'
+
 export interface BjmaniaCaptchaToken {
   ticket: string
   randstr: string
@@ -130,18 +135,24 @@ export interface BjmaniaGitadoraSnapshot {
   gitadoraProfile: BjmaniaGitadoraProfile
   bestScores: BjmaniaBestScoresResponse
   recentPlays: BjmaniaRecentPlaysResponse
+  hotMusicIds: number[]
 }
 
 export interface BjmaniaScoreSheet {
+  family: BjmaniaScoreFamily
   instrument: InstrumentKey
   level: LevelKey
   label: string
+  branchLabel: string | null
+  skillFumen: number
 }
 
 export interface BjmaniaScoreListItem {
   musicId: number
   song: SongViewModel | null
+  family: BjmaniaScoreFamily
   instrument: InstrumentKey
+  branchLabel: string | null
   level: LevelKey
   sheetLabel: string
   percRaw: number
@@ -152,15 +163,24 @@ export interface BjmaniaScoreListItem {
   autoClear: boolean
   fullCombo: boolean
   excellent: boolean
-  meter: string
-  meterProg: number
+  difficultyRaw: number
+  difficultyText: string
+  skillCalcRaw: number
+  skillCalcText: string
+  isHot: boolean
+  isDeleted: boolean
+  isClassic: boolean
+  inSkill: boolean
+  searchText: string
 }
 
 export interface BjmaniaRecentListItem {
   format: string
   timestamp: number
   song: SongViewModel | null
+  family: BjmaniaScoreFamily | null
   instrument: InstrumentKey | null
+  branchLabel: string | null
   level: LevelKey | null
   sheetLabel: string
   percText: string

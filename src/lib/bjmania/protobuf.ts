@@ -144,6 +144,15 @@ export function getStringField(fields: ProtoField[], fieldNumber: number, fallba
   return new TextDecoder().decode(field.value)
 }
 
+function decodeSignedInt32(value: bigint) {
+  const normalized = value & 0xffffffffn
+  return normalized >= 0x80000000n ? Number(normalized - 0x100000000n) : Number(normalized)
+}
+
+function decodeZigzagSint32(value: bigint) {
+  return Number((value >> 1n) ^ -(value & 1n))
+}
+
 export function getInt32Field(fields: ProtoField[], fieldNumber: number, fallback = 0) {
   const field = getFieldList(fields, fieldNumber).find((entry) => entry.wireType === 0)
 
@@ -151,7 +160,7 @@ export function getInt32Field(fields: ProtoField[], fieldNumber: number, fallbac
     return fallback
   }
 
-  return Number(field.value)
+  return decodeSignedInt32(field.value)
 }
 
 export function getInt64StringField(fields: ProtoField[], fieldNumber: number, fallback = '0') {
@@ -199,6 +208,29 @@ export function getPackedInt32Field(fields: ProtoField[], fieldNumber: number) {
       while (offset < field.value.length) {
         const item = readVarint(field.value, offset)
         values.push(Number(item.value))
+        offset = item.offset
+      }
+    }
+  })
+
+  return values
+}
+
+export function getPackedSint32Field(fields: ProtoField[], fieldNumber: number) {
+  const values: number[] = []
+
+  getFieldList(fields, fieldNumber).forEach((field) => {
+    if (field.wireType === 0 && typeof field.value === 'bigint') {
+      values.push(decodeZigzagSint32(field.value))
+      return
+    }
+
+    if (field.wireType === 2 && field.value instanceof Uint8Array) {
+      let offset = 0
+
+      while (offset < field.value.length) {
+        const item = readVarint(field.value, offset)
+        values.push(decodeZigzagSint32(item.value))
         offset = item.offset
       }
     }

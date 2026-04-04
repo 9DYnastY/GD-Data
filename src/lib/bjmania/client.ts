@@ -12,13 +12,14 @@ import type {
   BjmaniaRecentPlayEntry,
   BjmaniaRecentPlayPayload,
   BjmaniaRecentPlaysResponse,
-  BjmaniaScoreListItem,
+  BjmaniaScoreFamily,
   BjmaniaScoreSheet,
   BjmaniaRecentListItem,
+  BjmaniaScoreListItem,
 } from '../../types/bjmania'
-import type { InstrumentKey, LevelKey, SongViewModel } from '../../types/song'
+import type { LevelKey, SongViewModel } from '../../types/song'
 import { decodeGrpcWebUnary, encodeGrpcWebUnary } from './grpc-web'
-import { bjmaniaGrpcRequest, bjmaniaJsonRequest } from './http'
+import { bjmaniaBinaryRequest, bjmaniaGrpcRequest, bjmaniaJsonRequest } from './http'
 import {
   encodeInt32Field,
   encodeProtoMessage,
@@ -28,21 +29,21 @@ import {
   getInt64StringField,
   getMessageFieldList,
   getPackedInt32Field,
+  getPackedSint32Field,
   getStringField,
   parseProtoMessage,
 } from './protobuf'
 
 const GITADORA_GAME_CODE = 'M32'
+const BJMANIA_ASSETS_MDB_BASE_URL = 'https://assets.bjmania.com/mdb'
 const RANK_LABELS: Record<number, string> = {
-  0: '---',
-  1: 'E',
-  2: 'D',
-  3: 'C',
-  4: 'B',
-  5: 'A',
-  6: 'AA',
-  7: 'AAA',
-  8: 'S',
+  0: 'E',
+  1: 'D',
+  2: 'C',
+  3: 'B',
+  4: 'A',
+  5: 'S',
+  6: 'SS',
 }
 const LEVEL_BY_INDEX: Record<number, LevelKey> = {
   1: 'basic',
@@ -56,6 +57,8 @@ const LEVEL_LABELS: Record<LevelKey, string> = {
   extreme: 'EXTREME',
   master: 'MASTER',
 }
+const hotMusicDbPromiseCache = new Map<string, Promise<number[]>>()
+let musicDbVersionManifestPromise: Promise<Record<string, Record<string, Record<string, string>>>> | null = null
 
 function parseAuthUser(payload: unknown): BjmaniaAuthUser {
   const data = (payload ?? {}) as Partial<BjmaniaAuthUser>
@@ -178,6 +181,39 @@ function parseRecentPlaysResponse(payload: Uint8Array): BjmaniaRecentPlaysRespon
   }
 }
 
+async function fetchBinary(url: string) {
+  const response = await bjmaniaBinaryRequest(url, 'application/octet-stream, application/json, */*')
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Failed to fetch ${url} (${response.status})`)
+  }
+
+  return response.body
+}
+
+async function fetchMusicDbVersionManifest() {
+  if (!musicDbVersionManifestPromise) {
+    musicDbVersionManifestPromise = bjmaniaBinaryRequest(
+      `${BJMANIA_ASSETS_MDB_BASE_URL}/ver.json?t=${Date.now()}`,
+      'application/json, text/plain, */*',
+    ).then((response) => {
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Failed to fetch BJMANIA mdb version manifest (${response.status})`)
+      }
+
+      const manifestText = new TextDecoder().decode(response.body)
+      return JSON.parse(manifestText) as Record<string, Record<string, Record<string, string>>>
+    })
+  }
+
+  return musicDbVersionManifestPromise
+}
+
+function parseHotMusicIds(payload: Uint8Array) {
+  const fields = parseProtoMessage(payload)
+  return getPackedSint32Field(fields, 1)
+}
+
 async function callGrpcUnary(path: string, message: Uint8Array) {
   const response = await bjmaniaGrpcRequest(path, encodeGrpcWebUnary(message))
 
@@ -234,6 +270,51 @@ export async function getBjmaniaRecentPlays() {
   return parseRecentPlaysResponse(payload)
 }
 
+function resolveMusicDbVersion(
+  manifest: Record<string, Record<string, Record<string, string>>>,
+  game: string,
+  tag: 'hot',
+  explicitVersion?: number,
+) {
+  if (typeof explicitVersion === 'number') {
+    return explicitVersion
+  }
+
+  const versions = Object.keys(manifest[game]?.[tag] ?? {})
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => right - left)
+
+  return versions[0]
+}
+
+export async function getBjmaniaMusicDb(options: {
+  game: string
+  tag: 'hot'
+  version?: number
+}) {
+  const manifest = await fetchMusicDbVersionManifest()
+  const resolvedVersion = resolveMusicDbVersion(manifest, options.game, options.tag, options.version)
+
+  if (!Number.isFinite(resolvedVersion)) {
+    throw new Error(`Could not resolve BJMANIA ${options.game} ${options.tag} music db version`)
+  }
+
+  const cacheKey = `${options.game}:${options.tag}:${resolvedVersion}`
+  const cachedLoader = hotMusicDbPromiseCache.get(cacheKey)
+
+  if (cachedLoader) {
+    return cachedLoader
+  }
+
+  const loader = fetchBinary(
+    `${BJMANIA_ASSETS_MDB_BASE_URL}/${options.game}_${options.tag}_${resolvedVersion}.bin?t=${Date.now()}`,
+  ).then(parseHotMusicIds)
+
+  hotMusicDbPromiseCache.set(cacheKey, loader)
+  return loader
+}
+
 export async function loadBjmaniaGitadoraSnapshot() {
   const authUser = await getBjmaniaAuthMe()
   const profiles = await getBjmaniaProfiles()
@@ -244,10 +325,11 @@ export async function loadBjmaniaGitadoraSnapshot() {
     throw new Error('Could not resolve the current GITADORA version from GetProfiles')
   }
 
-  const [gitadoraProfile, bestScores, recentPlays] = await Promise.all([
+  const [gitadoraProfile, bestScores, recentPlays, hotMusicIds] = await Promise.all([
     getBjmaniaGitadoraProfile(currentVersion),
     getBjmaniaGitadoraBestScores(),
     getBjmaniaRecentPlays(),
+    getBjmaniaMusicDb({ game: GITADORA_GAME_CODE, tag: 'hot', version: currentVersion }).catch(() => []),
   ])
 
   return {
@@ -257,6 +339,7 @@ export async function loadBjmaniaGitadoraSnapshot() {
     gitadoraProfile,
     bestScores,
     recentPlays,
+    hotMusicIds,
   } satisfies BjmaniaGitadoraSnapshot
 }
 
@@ -265,6 +348,14 @@ export function rankToLabel(rank: number) {
 }
 
 export function rawPercentToText(rawPercent: number) {
+  if (rawPercent === -2) {
+    return 'NO PLAY'
+  }
+
+  if (rawPercent === -1) {
+    return 'FAILED'
+  }
+
   return `${(rawPercent / 100).toFixed(2)}%`
 }
 
@@ -275,17 +366,44 @@ export function rawSkillToText(rawSkill: number) {
 export function resolveScoreSheet(fumen: number): BjmaniaScoreSheet | null {
   if (fumen >= 1 && fumen <= 4) {
     const level = LEVEL_BY_INDEX[fumen]
-    return level ? { instrument: 'drum', level, label: LEVEL_LABELS[level] } : null
+    return level
+      ? {
+          family: 'dm',
+          instrument: 'drum',
+          level,
+          label: LEVEL_LABELS[level],
+          branchLabel: null,
+          skillFumen: fumen,
+        }
+      : null
   }
 
   if (fumen >= 5 && fumen <= 8) {
     const level = LEVEL_BY_INDEX[fumen - 4]
-    return level ? { instrument: 'guitar', level, label: LEVEL_LABELS[level] } : null
+    return level
+      ? {
+          family: 'gf',
+          instrument: 'bass',
+          level,
+          label: LEVEL_LABELS[level],
+          branchLabel: 'Bass',
+          skillFumen: fumen,
+        }
+      : null
   }
 
   if (fumen >= 9 && fumen <= 12) {
     const level = LEVEL_BY_INDEX[fumen - 8]
-    return level ? { instrument: 'bass', level, label: LEVEL_LABELS[level] } : null
+    return level
+      ? {
+          family: 'gf',
+          instrument: 'guitar',
+          level,
+          label: LEVEL_LABELS[level],
+          branchLabel: 'Guitar',
+          skillFumen: fumen - 8,
+        }
+      : null
   }
 
   return null
@@ -295,21 +413,113 @@ function buildSongMap(songs: SongViewModel[]) {
   return new Map<number, SongViewModel>(songs.map((song) => [song.musicId, song]))
 }
 
-export function mapBestScoresToList(bestScores: BjmaniaBestScoreItem[], songs: SongViewModel[]) {
-  const songMap = buildSongMap(songs)
+function getDifficultyIndex(family: BjmaniaScoreFamily, skillFumen: number) {
+  if (family === 'dm') {
+    return 5 + skillFumen
+  }
 
-  return bestScores
+  return skillFumen < 5 ? skillFumen : 6 + skillFumen
+}
+
+function rawDifficultyToText(rawDifficulty: number) {
+  return rawDifficulty > 0 ? (rawDifficulty / 100).toFixed(2) : '--'
+}
+
+function calculateSkillCalcRaw(rawDifficulty: number, rawPercent: number) {
+  const rawSkill = Math.trunc(20 * rawDifficulty * rawPercent * 1e-4)
+  return rawSkill > 0 ? rawSkill : 0
+}
+
+function isDuplicateScore(bucket: BjmaniaScoreListItem[], index: number) {
+  if (index === 0) {
+    return false
+  }
+
+  const row = bucket[index]
+
+  for (let pointer = 0; pointer < index; pointer += 1) {
+    if (bucket[pointer].musicId === row.musicId && bucket[pointer].clear && !bucket[pointer].isDeleted) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function markSkillEntries(rows: BjmaniaScoreListItem[]) {
+  const bucketMap = new Map<string, BjmaniaScoreListItem[]>()
+
+  rows.forEach((row) => {
+    row.inSkill = false
+
+    const bucketKey = `${row.family}:${row.isHot ? 'hot' : 'other'}`
+    const bucket = bucketMap.get(bucketKey)
+
+    if (bucket) {
+      bucket.push(row)
+    } else {
+      bucketMap.set(bucketKey, [row])
+    }
+  })
+
+  for (const bucket of bucketMap.values()) {
+    const sortedBucket = bucket
+      .slice()
+      .sort((left, right) => right.skillCalcRaw - left.skillCalcRaw || left.musicId - right.musicId)
+
+    let inSkillCount = 0
+
+    sortedBucket.forEach((row, index) => {
+      if (!row.clear || row.isDeleted) {
+        return
+      }
+
+      const duplicate = isDuplicateScore(sortedBucket, index)
+
+      if (row.isClassic) {
+        return
+      }
+
+      if (inSkillCount < 25 && !duplicate) {
+        row.inSkill = true
+        inSkillCount += 1
+      }
+    })
+  }
+
+  return rows
+}
+
+export function mapBestScoresToList(
+  bestScores: BjmaniaBestScoreItem[],
+  songs: SongViewModel[],
+  hotMusicIds: number[] = [],
+) {
+  const songMap = buildSongMap(songs)
+  const hotMusicIdSet = new Set(hotMusicIds)
+  const rows = bestScores
     .map((score): BjmaniaScoreListItem | null => {
+      if (score.autoClear) {
+        return null
+      }
+
       const sheet = resolveScoreSheet(score.fumen)
 
       if (!sheet) {
         return null
       }
 
+      const song = songMap.get(score.musicId) ?? null
+      const difficultyRaw =
+        song?.metadata.xgDiffList[getDifficultyIndex(sheet.family, sheet.skillFumen)] ?? 0
+      const skillCalcRaw = calculateSkillCalcRaw(difficultyRaw, score.percRaw)
+
       return {
         musicId: score.musicId,
-        song: songMap.get(score.musicId) ?? null,
+        song,
+        family: sheet.family,
         instrument: sheet.instrument,
+        branchLabel: sheet.branchLabel,
         level: sheet.level,
         sheetLabel: sheet.label,
         percRaw: score.percRaw,
@@ -320,11 +530,20 @@ export function mapBestScoresToList(bestScores: BjmaniaBestScoreItem[], songs: S
         autoClear: score.autoClear,
         fullCombo: score.fullCombo,
         excellent: score.excellent,
-        meter: score.meter,
-        meterProg: score.meterProg,
+        difficultyRaw,
+        difficultyText: rawDifficultyToText(difficultyRaw),
+        skillCalcRaw,
+        skillCalcText: rawSkillToText(skillCalcRaw),
+        isHot: hotMusicIdSet.has(score.musicId),
+        isDeleted: song?.metadata.isDeleted ?? false,
+        isClassic: song?.metadata.isClassic ?? false,
+        inSkill: false,
+        searchText: song?.searchText ?? String(score.musicId),
       }
     })
     .filter((entry): entry is BjmaniaScoreListItem => entry !== null)
+
+  return markSkillEntries(rows)
 }
 
 function normalizeBooleanValue(value: unknown) {
@@ -367,7 +586,9 @@ export function mapRecentPlaysToList(recentPlays: BjmaniaRecentPlay[], songs: So
       format: entry.format,
       timestamp: entry.timestamp,
       song,
+      family: sheet?.family ?? null,
       instrument: sheet?.instrument ?? null,
+      branchLabel: sheet?.branchLabel ?? null,
       level: sheet?.level ?? null,
       sheetLabel: sheet?.label ?? '--',
       percText: rawPercent !== null ? rawPercentToText(rawPercent) : '--',
@@ -377,10 +598,10 @@ export function mapRecentPlaysToList(recentPlays: BjmaniaRecentPlay[], songs: So
   })
 }
 
-export function filterScoresByInstrument(scores: BjmaniaScoreListItem[], instrument: InstrumentKey) {
-  return scores.filter((score) => score.instrument === instrument)
+export function filterScoresByFamily(scores: BjmaniaScoreListItem[], family: BjmaniaScoreFamily) {
+  return scores.filter((score) => score.family === family)
 }
 
-export function filterRecentByInstrument(recent: BjmaniaRecentListItem[], instrument: InstrumentKey) {
-  return recent.filter((entry) => entry.instrument === instrument)
+export function filterRecentByFamily(recent: BjmaniaRecentListItem[], family: BjmaniaScoreFamily) {
+  return recent.filter((entry) => entry.family === family)
 }

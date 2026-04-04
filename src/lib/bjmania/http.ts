@@ -3,6 +3,7 @@ import {
   clearBjmaniaNativeSession,
   isNativeBjmaniaApi,
   nativeBjmaniaAuthMe,
+  nativeBjmaniaFetchBinary,
   nativeBjmaniaGrpcUnary,
 } from './native-api'
 
@@ -73,6 +74,23 @@ export async function bjmaniaGrpcRequest(path: string, body: Uint8Array) {
     },
     credentials: 'include',
     body: webBody.buffer,
+  })
+
+  return {
+    status: response.status,
+    body: new Uint8Array(await response.arrayBuffer()),
+  }
+}
+
+export async function bjmaniaBinaryRequest(url: string, accept: string) {
+  if (isNativeBjmaniaApi()) {
+    return await nativeBjmaniaFetchBinary(url, accept)
+  }
+
+  const response = await fetch(url, {
+    headers: {
+      Accept: accept,
+    },
   })
 
   return {

@@ -176,14 +176,74 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
                 }
             );
 
-        resetBjmaniaSessionAndLoadLogin();
+        attemptSessionRestoreOrLoadLogin();
     }
 
-    private void resetBjmaniaSessionAndLoadLogin() {
+    private void attemptSessionRestoreOrLoadLogin() {
+        if (sessionManager == null || !sessionManager.hasWebViewCookies()) {
+            loadLoginPage();
+            return;
+        }
+
+        updateStatus("Checking saved BJMANIA session...");
+
+        new Thread(
+                () -> {
+                    try {
+                        BjmaniaSessionManager.AuthCheckResult result =
+                            sessionManager.probeAuthMeWithWebViewCookies();
+                        handleRestoreProbeResult(result, null);
+                    } catch (IOException exception) {
+                        handleRestoreProbeResult(null, exception);
+                    }
+                }
+            )
+            .start();
+    }
+
+    private void handleRestoreProbeResult(
+        @Nullable BjmaniaSessionManager.AuthCheckResult probeResult,
+        @Nullable IOException exception
+    ) {
+        runOnUiThread(
+            () -> {
+                if (finishingResult) {
+                    return;
+                }
+
+                if (exception != null) {
+                    Log.d(TAG, "restoreProbe failed error=" + exception.getMessage());
+                    loadLoginPage();
+                    return;
+                }
+
+                if (probeResult != null) {
+                    Log.d(
+                        TAG,
+                        "restoreProbe status=" +
+                        probeResult.statusCode +
+                        " cookieLength=" +
+                        probeResult.cookieLength +
+                        " hadCookie=" +
+                        probeResult.hadCookie
+                    );
+                }
+
+                if (probeResult != null && probeResult.success) {
+                    finishSuccess();
+                    return;
+                }
+
+                loadLoginPage();
+            }
+        );
+    }
+
+    private void loadLoginPage() {
         updateStatus("Preparing BJMANIA login...");
 
         if (sessionManager != null) {
-            sessionManager.clearAllSession();
+            sessionManager.clearNativeSession();
         }
 
         if (webView != null) {

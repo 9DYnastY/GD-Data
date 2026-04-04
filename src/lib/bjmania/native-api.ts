@@ -13,6 +13,13 @@ interface BjmaniaApiPlugin {
     status: number
     responseBase64: string
   }>
+  fetchBinary(options: {
+    url: string
+    accept?: string
+  }): Promise<{
+    status: number
+    responseBase64: string
+  }>
   clearSession(): Promise<void>
 }
 
@@ -35,6 +42,18 @@ export async function nativeBjmaniaGrpcUnary(path: string, body: Uint8Array) {
   const response = await BjmaniaApi.grpcUnary({
     path,
     requestBase64: uint8ArrayToBase64(body),
+  })
+
+  return {
+    status: response.status,
+    body: base64ToUint8Array(response.responseBase64 ?? ''),
+  }
+}
+
+export async function nativeBjmaniaFetchBinary(url: string, accept?: string) {
+  const response = await BjmaniaApi.fetchBinary({
+    url,
+    accept,
   })
 
   return {

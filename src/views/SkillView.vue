@@ -3,8 +3,8 @@ import { Capacitor } from '@capacitor/core'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { requestBjmaniaCaptchaToken } from '../lib/bjmania/captcha'
 import {
-  filterRecentByInstrument,
-  filterScoresByInstrument,
+  filterRecentByFamily,
+  filterScoresByFamily,
   getBjmaniaAuthMe,
   loadBjmaniaGitadoraSnapshot,
   loginBjmania,
@@ -17,19 +17,38 @@ import { openBjmaniaNativeLogin } from '../lib/bjmania/native-auth'
 import { loadSongCatalog } from '../lib/song-catalog'
 import type {
   BjmaniaAuthUser,
+  BjmaniaScoreFamily,
+  BjmaniaScoreFilterKey,
+  BjmaniaScoreHotFilter,
   BjmaniaGitadoraSnapshot,
   BjmaniaRecentListItem,
   BjmaniaScoreListItem,
+  BjmaniaScoreSortKey,
 } from '../types/bjmania'
-import type { InstrumentKey } from '../types/song'
 
 const LOGIN_EMAIL_STORAGE_KEY = 'gddata:bjmania-email'
 const SCORE_PAGE_SIZE = 50
-const INSTRUMENT_LABELS: Record<InstrumentKey, string> = {
-  drum: 'Drum',
-  guitar: 'Guitar',
-  bass: 'Bass',
+const FAMILY_LABELS: Record<BjmaniaScoreFamily, string> = {
+  dm: 'DM',
+  gf: 'GF',
 }
+const HOT_FILTER_OPTIONS: Array<{ value: BjmaniaScoreHotFilter; label: string }> = [
+  { value: 'all', label: 'All songs' },
+  { value: 'hot', label: 'Hot only' },
+  { value: 'other', label: 'Other only' },
+]
+const SCORE_FILTER_OPTIONS: Array<{ value: BjmaniaScoreFilterKey; label: string }> = [
+  { value: 'current', label: 'Current songs' },
+  { value: 'skill', label: 'Skill songs' },
+  { value: 'deleted', label: 'Deleted songs' },
+  { value: 'classic', label: 'Classic songs' },
+  { value: 'non-classic', label: 'Hide classic' },
+]
+const SCORE_SORT_OPTIONS: Array<{ value: BjmaniaScoreSortKey; label: string }> = [
+  { value: 'skill', label: 'Sort by Skill' },
+  { value: 'rate', label: 'Sort by Rate' },
+  { value: 'difficulty', label: 'Sort by Difficulty' },
+]
 
 const booting = ref(true)
 const submitting = ref(false)
@@ -41,7 +60,11 @@ const snapshot = ref<BjmaniaGitadoraSnapshot | null>(null)
 const scoreRows = ref<BjmaniaScoreListItem[]>([])
 const recentRows = ref<BjmaniaRecentListItem[]>([])
 const visibleScoreCount = ref(SCORE_PAGE_SIZE)
-const selectedInstrument = ref<InstrumentKey>('drum')
+const selectedFamily = ref<BjmaniaScoreFamily>('dm')
+const selectedHotFilter = ref<BjmaniaScoreHotFilter>('all')
+const selectedScoreFilter = ref<BjmaniaScoreFilterKey>('current')
+const selectedScoreSort = ref<BjmaniaScoreSortKey>('skill')
+const scoreSearch = ref('')
 
 const loginForm = reactive({
   email: typeof window === 'undefined' ? '' : window.localStorage.getItem(LOGIN_EMAIL_STORAGE_KEY) ?? '',
@@ -54,7 +77,46 @@ const isNativeRuntime = computed(() => isNativeBjmaniaHttp())
 const isAuthenticated = computed(() => authUser.value !== null)
 
 const filteredScores = computed(() => {
-  return filterScoresByInstrument(scoreRows.value, selectedInstrument.value)
+  const normalizedSearch = scoreSearch.value.trim().toLowerCase()
+  let rows = filterScoresByFamily(scoreRows.value, selectedFamily.value)
+
+  if (selectedHotFilter.value === 'hot') {
+    rows = rows.filter((row) => row.isHot)
+  } else if (selectedHotFilter.value === 'other') {
+    rows = rows.filter((row) => !row.isHot)
+  }
+
+  rows = rows.filter((row) => {
+    switch (selectedScoreFilter.value) {
+      case 'skill':
+        return row.inSkill
+      case 'deleted':
+        return row.isDeleted
+      case 'classic':
+        return row.isClassic
+      case 'non-classic':
+        return !row.isClassic && !row.isDeleted
+      case 'current':
+      default:
+        return !row.isDeleted
+    }
+  })
+
+  if (normalizedSearch) {
+    rows = rows.filter((row) => row.searchText.includes(normalizedSearch))
+  }
+
+  return rows.slice().sort((left, right) => {
+    switch (selectedScoreSort.value) {
+      case 'rate':
+        return right.percRaw - left.percRaw || right.skillCalcRaw - left.skillCalcRaw
+      case 'difficulty':
+        return right.difficultyRaw - left.difficultyRaw || right.skillCalcRaw - left.skillCalcRaw
+      case 'skill':
+      default:
+        return right.skillCalcRaw - left.skillCalcRaw || right.percRaw - left.percRaw
+    }
+  })
 })
 
 const visibleScores = computed(() => {
@@ -66,7 +128,7 @@ const hasMoreScores = computed(() => {
 })
 
 const filteredRecent = computed(() => {
-  return filterRecentByInstrument(recentRows.value, selectedInstrument.value).slice(0, 8)
+  return filterRecentByFamily(recentRows.value, selectedFamily.value).slice(0, 8)
 })
 
 const skillSummary = computed(() => {
@@ -77,7 +139,6 @@ const skillSummary = computed(() => {
   return {
     gf: rawSkillToText(snapshot.value.gitadoraProfile.gfSkillRaw),
     dm: rawSkillToText(snapshot.value.gitadoraProfile.dmSkillRaw),
-    version: snapshot.value.currentVersion,
   }
 })
 
@@ -102,7 +163,11 @@ async function hydrateSnapshot() {
 
     authUser.value = nextSnapshot.authUser
     snapshot.value = nextSnapshot
-    scoreRows.value = mapBestScoresToList(nextSnapshot.bestScores.bestScores, songs)
+    scoreRows.value = mapBestScoresToList(
+      nextSnapshot.bestScores.bestScores,
+      songs,
+      nextSnapshot.hotMusicIds,
+    )
     recentRows.value = mapRecentPlaysToList(nextSnapshot.recentPlays.recentPlayEntries, songs)
   } catch (error) {
     snapshot.value = null
@@ -232,7 +297,7 @@ function songArtist(row: BjmaniaScoreListItem | BjmaniaRecentListItem) {
   return row.song?.displayArtist ?? 'Unknown artist'
 }
 
-watch(selectedInstrument, () => {
+watch([selectedFamily, selectedHotFilter, selectedScoreFilter, selectedScoreSort, scoreSearch], () => {
   visibleScoreCount.value = SCORE_PAGE_SIZE
 })
 
@@ -347,35 +412,63 @@ onMounted(() => {
               <span class="skill-stat__label">GF Skill</span>
               <strong>{{ skillSummary?.gf ?? '--' }}</strong>
             </article>
-            <article class="skill-stat">
-              <span class="skill-stat__label">Version</span>
-              <strong>M32 / {{ skillSummary?.version ?? '--' }}</strong>
-            </article>
-            <article class="skill-stat">
-              <span class="skill-stat__label">Best Scores</span>
-              <strong>{{ scoreRows.length }}</strong>
-            </article>
           </div>
         </section>
 
         <section class="skill-card">
           <div class="skill-card__header">
             <div>
-              <p class="skill-card__eyebrow">Instrument</p>
+              <p class="skill-card__eyebrow">Category</p>
               <h2>Score list</h2>
             </div>
           </div>
 
-          <div class="instrument-tabs" role="tablist" aria-label="Instrument">
+          <div class="instrument-tabs" role="tablist" aria-label="Category">
             <button
-              v-for="(label, instrument) in INSTRUMENT_LABELS"
-              :key="instrument"
+              v-for="(label, family) in FAMILY_LABELS"
+              :key="family"
               class="instrument-tabs__item"
-              :class="{ 'instrument-tabs__item--active': selectedInstrument === instrument }"
-              @click="selectedInstrument = instrument"
+              :class="{ 'instrument-tabs__item--active': selectedFamily === family }"
+              @click="selectedFamily = family"
             >
               {{ label }}
             </button>
+          </div>
+
+          <div class="score-filters">
+            <label class="skill-field">
+              <span>Search</span>
+              <input v-model="scoreSearch" placeholder="Song title / artist / ID" />
+            </label>
+
+            <div class="score-filters__grid">
+              <label class="skill-field">
+                <span>Hot</span>
+                <select v-model="selectedHotFilter">
+                  <option v-for="option in HOT_FILTER_OPTIONS" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="skill-field">
+                <span>List</span>
+                <select v-model="selectedScoreFilter">
+                  <option v-for="option in SCORE_FILTER_OPTIONS" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <label class="skill-field">
+              <span>Sort</span>
+              <select v-model="selectedScoreSort">
+                <option v-for="option in SCORE_SORT_OPTIONS" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
           </div>
 
           <p v-if="loadingData" class="skill-message">Loading live GITADORA data...</p>
@@ -390,19 +483,26 @@ onMounted(() => {
                 </div>
 
                 <div class="score-row__meta">
+                  <span v-if="row.branchLabel" class="meta-pill meta-pill--light">{{ row.branchLabel }}</span>
                   <span class="meta-pill meta-pill--light">{{ row.sheetLabel }}</span>
+                  <span v-if="row.isHot" class="meta-pill meta-pill--hot">HOT</span>
+                  <span v-if="row.inSkill" class="meta-pill meta-pill--skill">IN SKILL</span>
                   <span class="meta-pill">{{ row.rankLabel }}</span>
                 </div>
               </div>
 
               <div class="score-row__stats">
                 <div>
+                  <span class="score-row__stat-label">Skill</span>
+                  <strong>{{ row.skillCalcText }}</strong>
+                </div>
+                <div>
                   <span class="score-row__stat-label">Rate</span>
                   <strong>{{ row.percText }}</strong>
                 </div>
                 <div>
-                  <span class="score-row__stat-label">Meter</span>
-                  <strong>{{ row.meter }}</strong>
+                  <span class="score-row__stat-label">Difficulty</span>
+                  <strong>{{ row.difficultyText }}</strong>
                 </div>
               </div>
 
@@ -410,10 +510,14 @@ onMounted(() => {
                 <span v-if="row.clear" class="tag-chip tag-chip--soft">CLEAR</span>
                 <span v-if="row.fullCombo" class="tag-chip tag-chip--soft">FC</span>
                 <span v-if="row.excellent" class="tag-chip tag-chip--soft">EXC</span>
+                <span v-if="row.isClassic" class="tag-chip tag-chip--soft">CLASSIC</span>
+                <span v-if="row.isDeleted" class="tag-chip tag-chip--soft">DELETED</span>
               </div>
             </article>
 
-            <p v-if="!visibleScores.length" class="skill-message">No scores found for {{ INSTRUMENT_LABELS[selectedInstrument] }}.</p>
+            <p v-if="!visibleScores.length" class="skill-message">
+              No scores found for {{ FAMILY_LABELS[selectedFamily] }}.
+            </p>
 
             <div v-if="hasMoreScores" class="score-list__more">
               <button class="action-button action-button--muted" @click="loadMoreScores">
@@ -439,6 +543,7 @@ onMounted(() => {
               </div>
 
               <div class="recent-row__side">
+                <span v-if="entry.branchLabel" class="meta-pill meta-pill--light">{{ entry.branchLabel }}</span>
                 <span class="meta-pill meta-pill--light">{{ entry.sheetLabel }}</span>
                 <span class="recent-row__time">{{ formatTimestamp(entry.timestamp) }}</span>
                 <span class="recent-row__score">{{ entry.percText }} / {{ entry.rankLabel }}</span>
@@ -446,7 +551,7 @@ onMounted(() => {
             </article>
 
             <p v-if="!filteredRecent.length" class="skill-message">
-              No recent plays detected for {{ INSTRUMENT_LABELS[selectedInstrument] }}.
+              No recent plays detected for {{ FAMILY_LABELS[selectedFamily] }}.
             </p>
           </div>
         </section>
@@ -555,6 +660,16 @@ onMounted(() => {
   font-size: 0.9rem;
 }
 
+.skill-field input,
+.skill-field select {
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  padding: 0 14px;
+}
+
 .skill-checkbox {
   display: inline-flex;
   align-items: center;
@@ -604,7 +719,7 @@ onMounted(() => {
 
 .instrument-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -621,6 +736,17 @@ onMounted(() => {
   border-color: rgba(255, 159, 74, 0.52);
   background: rgba(255, 159, 74, 0.14);
   color: var(--accent-strong);
+}
+
+.score-filters {
+  display: grid;
+  gap: 12px;
+}
+
+.score-filters__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .score-list,
@@ -687,6 +813,16 @@ onMounted(() => {
   color: #ddd5ff;
 }
 
+.meta-pill--hot {
+  background: rgba(255, 159, 74, 0.2);
+  color: #ffd3a7;
+}
+
+.meta-pill--skill {
+  background: rgba(127, 228, 174, 0.18);
+  color: #c9ffdd;
+}
+
 .score-list__more {
   display: flex;
   justify-content: center;
@@ -719,6 +855,10 @@ onMounted(() => {
   .score-row__stats,
   .recent-row {
     flex-direction: column;
+  }
+
+  .score-filters__grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .score-row__meta,

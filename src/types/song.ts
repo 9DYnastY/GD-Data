@@ -31,6 +31,7 @@ export interface RawSong {
   is_remaster: number | boolean | null
   b_long: boolean | null
   xg_b_session: boolean | null
+  disable_area?: number[] | null
 }
 
 export interface SongCatalogResponse {
@@ -78,6 +79,11 @@ export interface SongViewModel {
   maxDifficulty: number | null
   links: {
     remyUrl: string | null
+  }
+  metadata: {
+    isClassic: boolean
+    isDeleted: boolean
+    xgDiffList: number[]
   }
   searchText: string
   sortKeys: {

@@ -2,6 +2,7 @@ package com.gddata.gitadora;
 
 import android.content.Context;
 import android.net.Uri;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.webkit.CookieManager;
 import androidx.annotation.Nullable;
@@ -21,6 +22,8 @@ public final class BjmaniaSessionManager {
     public static final String HOST = "u.bjmania.com";
     private static final String DEFAULT_REFERER = BASE_URL + "/";
     private static final String XSRF_COOKIE_NAME = "XSRF-TOKEN";
+    private static final int COOKIE_SYNC_RETRY_COUNT = 8;
+    private static final long COOKIE_SYNC_RETRY_DELAY_MS = 120L;
 
     private static BjmaniaSessionManager instance;
 
@@ -33,6 +36,7 @@ public final class BjmaniaSessionManager {
 
     private BjmaniaSessionManager(Context context) {
         webViewCookieManager = CookieManager.getInstance();
+        webViewCookieManager.setAcceptCookie(true);
         cookieJar = new BjmaniaCookieJar();
 
         Interceptor requestContextInterceptor = chain -> {
@@ -73,7 +77,14 @@ public final class BjmaniaSessionManager {
                 }
             }
 
-            return chain.proceed(builder.build());
+            Request nextRequest = builder.build();
+            Response response = chain.proceed(nextRequest);
+
+            if (HOST.equals(nextRequest.url().host())) {
+                persistResponseCookies(nextRequest.url(), response);
+            }
+
+            return response;
         };
 
         client =
@@ -130,7 +141,16 @@ public final class BjmaniaSessionManager {
     }
 
     public synchronized void syncFromWebViewCookieManager() {
-        cookieJar.replaceAll(parseWebViewCookies(webViewCookieManager.getCookie(BASE_URL)));
+        String cookieHeader = readWebViewCookieHeaderWithWarmup();
+        if (TextUtils.isEmpty(cookieHeader)) {
+            return;
+        }
+
+        cookieJar.replaceAll(parseWebViewCookies(cookieHeader));
+    }
+
+    public synchronized boolean hasWebViewCookies() {
+        return !TextUtils.isEmpty(webViewCookieManager.getCookie(BASE_URL));
     }
 
     public synchronized void clearNativeSession() {
@@ -165,7 +185,7 @@ public final class BjmaniaSessionManager {
     }
 
     public AuthCheckResult probeAuthMeWithWebViewCookies() throws IOException {
-        String cookieHeader = webViewCookieManager.getCookie(BASE_URL);
+        String cookieHeader = readWebViewCookieHeaderWithWarmup();
         int cookieLength = cookieHeader == null ? 0 : cookieHeader.length();
 
         if (TextUtils.isEmpty(cookieHeader)) {
@@ -181,10 +201,8 @@ public final class BjmaniaSessionManager {
                 .build();
 
         try (Response response = probeClient.newCall(request).execute()) {
-            if (response.isSuccessful()) {
-                webViewCookieManager.flush();
-                syncFromWebViewCookieManager();
-            }
+            webViewCookieManager.flush();
+            syncFromWebViewCookieManager();
 
             return new AuthCheckResult(response.isSuccessful(), response.code(), cookieLength, true);
         }
@@ -199,7 +217,7 @@ public final class BjmaniaSessionManager {
     }
 
     private synchronized @Nullable String getXsrfToken() {
-        String cookieHeader = webViewCookieManager.getCookie(BASE_URL);
+        String cookieHeader = readWebViewCookieHeaderWithWarmup();
         if (TextUtils.isEmpty(cookieHeader)) {
             return null;
         }
@@ -249,6 +267,20 @@ public final class BjmaniaSessionManager {
         return url.toString();
     }
 
+    private synchronized void persistResponseCookies(HttpUrl url, Response response) {
+        List<String> setCookieHeaders = response.headers("Set-Cookie");
+        if (setCookieHeaders.isEmpty()) {
+            return;
+        }
+
+        String cookieUrl = url.toString();
+        for (String setCookieHeader : setCookieHeaders) {
+            webViewCookieManager.setCookie(cookieUrl, setCookieHeader);
+        }
+
+        webViewCookieManager.flush();
+    }
+
     private List<Cookie> parseWebViewCookies(@Nullable String cookieHeader) {
         List<Cookie> cookies = new ArrayList<>();
 
@@ -283,6 +315,21 @@ public final class BjmaniaSessionManager {
         }
 
         return cookies;
+    }
+
+    private @Nullable String readWebViewCookieHeaderWithWarmup() {
+        for (int attempt = 0; attempt <= COOKIE_SYNC_RETRY_COUNT; attempt++) {
+            String cookieHeader = webViewCookieManager.getCookie(BASE_URL);
+            if (!TextUtils.isEmpty(cookieHeader)) {
+                return cookieHeader;
+            }
+
+            if (attempt < COOKIE_SYNC_RETRY_COUNT) {
+                SystemClock.sleep(COOKIE_SYNC_RETRY_DELAY_MS);
+            }
+        }
+
+        return null;
     }
 
     public static final class AuthCheckResult {

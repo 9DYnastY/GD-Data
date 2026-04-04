@@ -227,9 +227,14 @@ export function normalizeSong(rawSong: RawSong, index: number): SongViewModel {
   const genre = createCodeLabel(rawSong.genre ?? null, 'Genre')
   const bpm = createBpmDisplay(rawSong)
   const instruments = createInstrumentDifficulties(rawSong)
+  const isClassic = normalizeBoolean(rawSong.is_classic_seq)
+  const isDeleted =
+    rawSong.disable_area?.[0] === 1 &&
+    rawSong.disable_area?.[1] === 1 &&
+    rawSong.disable_area?.[2] === 1
   const tags = [
     rawSong.b_long ? 'Long' : null,
-    normalizeBoolean(rawSong.is_classic_seq) ? 'Classic' : null,
+    isClassic ? 'Classic' : null,
     normalizeBoolean(rawSong.is_remaster) ? 'Remaster' : null,
     rawSong.xg_b_session ? 'Session' : null,
   ].filter((entry): entry is string => Boolean(entry))
@@ -263,6 +268,11 @@ export function normalizeSong(rawSong: RawSong, index: number): SongViewModel {
       return currentMax === null ? instrument.maxDifficulty : Math.max(currentMax, instrument.maxDifficulty)
     }, null),
     links: { remyUrl: rawSong.remy_url ?? null },
+    metadata: {
+      isClassic,
+      isDeleted,
+      xgDiffList: [...(rawSong.xg_diff_list ?? [])],
+    },
     searchText: createSearchText(rawSong, displayTitle, displayArtist),
     sortKeys: {
       defaultOrder: index,
