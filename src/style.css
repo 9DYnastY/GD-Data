@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;700&family=Space+Grotesk:wght@500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600&family=Inter:wght@400;700;800&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;700&family=Space+Grotesk:wght@500;700&display=swap');
 
 @font-face {
   font-family: 'AvantGardeITCbyBT-Book';
@@ -53,12 +53,14 @@
 
 html {
   scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
   background:
     linear-gradient(var(--bg-overlay), var(--bg-overlay)),
     radial-gradient(circle at top right, rgba(255, 159, 74, 0.28), transparent 24%),
@@ -89,6 +91,30 @@ select {
   font: inherit;
 }
 
+button,
+a,
+label,
+img,
+svg,
+[role='button'] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a,
+label,
+img,
+[role='button'] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+img,
+svg {
+  -webkit-user-drag: none;
+}
+
 input,
 select {
   width: 100%;
@@ -111,6 +137,14 @@ select:focus {
   border-color: rgba(255, 159, 74, 0.7);
   box-shadow: 0 0 0 3px rgba(255, 159, 74, 0.12);
   background: rgba(55, 44, 110, 0.96);
+}
+
+input,
+textarea,
+select {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 #app {

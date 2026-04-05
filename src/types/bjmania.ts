@@ -3,7 +3,13 @@ import type { InstrumentKey, LevelKey, SongViewModel } from './song'
 export type BjmaniaScoreFamily = 'dm' | 'gf'
 export type BjmaniaScoreHotFilter = 'all' | 'hot' | 'other'
 export type BjmaniaScoreFilterKey = 'current' | 'skill' | 'deleted' | 'classic' | 'non-classic'
-export type BjmaniaScoreSortKey = 'skill' | 'rate' | 'difficulty'
+export type BjmaniaScoreSortKey =
+  | 'skill-desc'
+  | 'skill-asc'
+  | 'rate-desc'
+  | 'rate-asc'
+  | 'difficulty-asc'
+  | 'difficulty-desc'
 
 export interface BjmaniaCaptchaToken {
   ticket: string

@@ -3,6 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import DifficultyRangeSlider from '../components/DifficultyRangeSlider.vue'
 import EmptyState from '../components/EmptyState.vue'
 import SongCard from '../components/SongCard.vue'
+import bassModeToggleSrc from '../assets/songlist-toggle/bass-mode.svg'
+import drumModeToggleSrc from '../assets/songlist-toggle/drum-mode.svg'
+import guitarModeToggleSrc from '../assets/songlist-toggle/guitar-mode.svg'
 import { loadSongCatalog } from '../lib/song-catalog'
 import type { InstrumentKey, SongViewModel } from '../types/song'
 
@@ -34,6 +37,11 @@ const INSTRUMENT_LABELS: Record<InstrumentKey, string> = {
   drum: 'Drum',
   guitar: 'Guitar',
   bass: 'Bass',
+}
+const INSTRUMENT_TOGGLE_ASSETS: Record<InstrumentKey, string> = {
+  drum: drumModeToggleSrc,
+  guitar: guitarModeToggleSrc,
+  bass: bassModeToggleSrc,
 }
 const GF_VERSION_MAP: Record<number, string> = {
   0: 'GF1st',
@@ -202,6 +210,7 @@ function matchesSelectedDifficultyRange(song: SongViewModel) {
 }
 
 const selectedInstrumentLabel = computed(() => INSTRUMENT_LABELS[selectedInstrument.value])
+const selectedInstrumentToggleSrc = computed(() => INSTRUMENT_TOGGLE_ASSETS[selectedInstrument.value])
 
 const versionOptions = computed(() => {
   const uniqueVersions = new Map<string, { value: string; label: string; order: number }>()
@@ -490,11 +499,6 @@ function compareMasterDifficulty(
 
 <template>
   <section class="home-view">
-    <video class="home-view__video" autoplay loop muted playsinline>
-      <source src="/5_background.mp4" type="video/mp4" />
-    </video>
-    <div class="home-view__overlay"></div>
-
     <header ref="topShellRef" class="top-shell">
       <div class="top-shell__purple">
         <div class="top-shell__bar">
@@ -658,12 +662,7 @@ function compareMasterDifficulty(
       @click="cycleInstrument"
       :aria-label="`Switch instrument, current ${selectedInstrumentLabel}`"
     >
-      <span class="instrument-fab__eyebrow">View</span>
-      <span class="instrument-fab__value">{{ selectedInstrumentLabel }}</span>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M8 5L15 12L8 19"></path>
-        <path d="M13 5L20 12L13 19"></path>
-      </svg>
+      <img class="instrument-fab__image" :src="selectedInstrumentToggleSrc" alt="" aria-hidden="true" />
     </button>
   </section>
 </template>
@@ -672,27 +671,6 @@ function compareMasterDifficulty(
 .home-view {
   position: relative;
   min-height: 100vh;
-}
-
-.home-view__video,
-.home-view__overlay {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-}
-
-.home-view__video {
-  z-index: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.home-view__overlay {
-  z-index: 1;
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.48)),
-    radial-gradient(circle at top, rgba(111, 88, 188, 0.16), transparent 30%);
 }
 
 .home-view__inner {
@@ -746,7 +724,7 @@ function compareMasterDifficulty(
   color: #49454f;
   box-shadow: none;
   font-family: 'Roboto', var(--font-sans);
-  font-size: 1rem;
+  font-size: 16px;
   letter-spacing: 0.03em;
 }
 
@@ -939,38 +917,25 @@ function compareMasterDifficulty(
 .instrument-fab {
   position: fixed;
   right: 14px;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
   z-index: 32;
-  display: inline-grid;
-  justify-items: center;
-  gap: 2px;
-  width: 68px;
-  height: 68px;
-  padding: 10px 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
   border: 0;
+  background: transparent;
   border-radius: 999px;
-  background: #eaddff;
-  color: #4f378a;
-  box-shadow: 0 4px 8px 3px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
   cursor: pointer;
 }
 
-.instrument-fab__eyebrow,
-.instrument-fab__value {
-  font-family: var(--font-display);
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.instrument-fab__eyebrow {
-  font-size: 0.52rem;
-  letter-spacing: 0.1em;
-  opacity: 0.72;
-}
-
-.instrument-fab__value {
-  font-size: 0.8rem;
-  font-weight: 700;
+.instrument-fab__image {
+  display: block;
+  width: 56px;
+  height: 56px;
 }
 
 .panel-fade-enter-active,

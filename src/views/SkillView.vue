@@ -1,53 +1,55 @@
 <script setup lang="ts">
-import { Capacitor } from '@capacitor/core'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { requestBjmaniaCaptchaToken } from '../lib/bjmania/captcha'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import SkillProfileBoard from '../components/SkillProfileBoard.vue'
+import SkillScoreCard from '../components/SkillScoreCard.vue'
+import dmModeToggleSrc from '../assets/skill-toggle/dm-mode.svg'
+import gfModeToggleSrc from '../assets/skill-toggle/gf-mode.svg'
 import {
   filterRecentByFamily,
   filterScoresByFamily,
   getBjmaniaAuthMe,
   loadBjmaniaGitadoraSnapshot,
-  loginBjmania,
   mapBestScoresToList,
   mapRecentPlaysToList,
   rawSkillToText,
 } from '../lib/bjmania/client'
-import { clearBjmaniaCookies, isNativeBjmaniaHttp } from '../lib/bjmania/http'
+import { BJMANIA_BASE_URL, clearBjmaniaCookies, isNativeBjmaniaHttp } from '../lib/bjmania/http'
 import { openBjmaniaNativeLogin } from '../lib/bjmania/native-auth'
 import { loadSongCatalog } from '../lib/song-catalog'
 import type {
   BjmaniaAuthUser,
+  BjmaniaGitadoraSnapshot,
+  BjmaniaRecentListItem,
   BjmaniaScoreFamily,
   BjmaniaScoreFilterKey,
   BjmaniaScoreHotFilter,
-  BjmaniaGitadoraSnapshot,
-  BjmaniaRecentListItem,
   BjmaniaScoreListItem,
   BjmaniaScoreSortKey,
 } from '../types/bjmania'
 
-const LOGIN_EMAIL_STORAGE_KEY = 'gddata:bjmania-email'
 const SCORE_PAGE_SIZE = 50
-const FAMILY_LABELS: Record<BjmaniaScoreFamily, string> = {
-  dm: 'DM',
-  gf: 'GF',
-}
+type SkillMenu = 'hot' | 'filter' | 'sort' | null
+const FAMILY_LABELS: Record<BjmaniaScoreFamily, string> = { dm: 'DM', gf: 'GF' }
+const FAMILY_TOGGLE_ASSETS: Record<BjmaniaScoreFamily, string> = { dm: dmModeToggleSrc, gf: gfModeToggleSrc }
 const HOT_FILTER_OPTIONS: Array<{ value: BjmaniaScoreHotFilter; label: string }> = [
-  { value: 'all', label: 'All songs' },
-  { value: 'hot', label: 'Hot only' },
-  { value: 'other', label: 'Other only' },
+  { value: 'all', label: '所有歌曲' },
+  { value: 'hot', label: 'Hot' },
+  { value: 'other', label: 'Other' },
 ]
 const SCORE_FILTER_OPTIONS: Array<{ value: BjmaniaScoreFilterKey; label: string }> = [
-  { value: 'current', label: 'Current songs' },
-  { value: 'skill', label: 'Skill songs' },
-  { value: 'deleted', label: 'Deleted songs' },
-  { value: 'classic', label: 'Classic songs' },
-  { value: 'non-classic', label: 'Hide classic' },
+  { value: 'current', label: '现有曲目' },
+  { value: 'skill', label: 'Skill曲目' },
+  { value: 'deleted', label: '删除曲目' },
+  { value: 'classic', label: '展示Classic曲目' },
+  { value: 'non-classic', label: '隐藏Classic曲目' },
 ]
 const SCORE_SORT_OPTIONS: Array<{ value: BjmaniaScoreSortKey; label: string }> = [
-  { value: 'skill', label: 'Sort by Skill' },
-  { value: 'rate', label: 'Sort by Rate' },
-  { value: 'difficulty', label: 'Sort by Difficulty' },
+  { value: 'skill-desc', label: 'Skill-降序' },
+  { value: 'skill-asc', label: 'Skill-升序' },
+  { value: 'rate-desc', label: 'Rate-降序' },
+  { value: 'rate-asc', label: 'Rate-升序' },
+  { value: 'difficulty-asc', label: 'Difficulty-升序' },
+  { value: 'difficulty-desc', label: 'Difficulty-降序' },
 ]
 
 const booting = ref(true)
@@ -63,111 +65,80 @@ const visibleScoreCount = ref(SCORE_PAGE_SIZE)
 const selectedFamily = ref<BjmaniaScoreFamily>('dm')
 const selectedHotFilter = ref<BjmaniaScoreHotFilter>('all')
 const selectedScoreFilter = ref<BjmaniaScoreFilterKey>('current')
-const selectedScoreSort = ref<BjmaniaScoreSortKey>('skill')
+const selectedScoreSort = ref<BjmaniaScoreSortKey>('skill-desc')
 const scoreSearch = ref('')
+const showFilters = ref(false)
+const showProfilePanel = ref(false)
+const openMenu = ref<SkillMenu>(null)
+const topShellRef = ref<HTMLElement | null>(null)
+const searchInputRef = ref<HTMLInputElement | null>(null)
 
-const loginForm = reactive({
-  email: typeof window === 'undefined' ? '' : window.localStorage.getItem(LOGIN_EMAIL_STORAGE_KEY) ?? '',
-  password: '',
-  remember: true,
-})
-
-const platformLabel = computed(() => Capacitor.getPlatform())
 const isNativeRuntime = computed(() => isNativeBjmaniaHttp())
 const isAuthenticated = computed(() => authUser.value !== null)
+const avatarBadgeLabel = computed(() => {
+  const name = snapshot.value?.gitadoraProfile.name?.trim() || authUser.value?.name?.trim()
+  return name ? name.charAt(0) : 'B'
+})
+const selectedHotLabel = computed(() => HOT_FILTER_OPTIONS.find((option) => option.value === selectedHotFilter.value)?.label ?? '所有歌曲')
+const selectedScoreFilterLabel = computed(() => SCORE_FILTER_OPTIONS.find((option) => option.value === selectedScoreFilter.value)?.label ?? '现有曲目')
+const selectedScoreSortLabel = computed(() => SCORE_SORT_OPTIONS.find((option) => option.value === selectedScoreSort.value)?.label ?? 'Skill-降序')
+const selectedFamilyToggleSrc = computed(() => FAMILY_TOGGLE_ASSETS[selectedFamily.value])
 
 const filteredScores = computed(() => {
   const normalizedSearch = scoreSearch.value.trim().toLowerCase()
   let rows = filterScoresByFamily(scoreRows.value, selectedFamily.value)
-
-  if (selectedHotFilter.value === 'hot') {
-    rows = rows.filter((row) => row.isHot)
-  } else if (selectedHotFilter.value === 'other') {
-    rows = rows.filter((row) => !row.isHot)
-  }
-
+  if (selectedHotFilter.value === 'hot') rows = rows.filter((row) => row.isHot)
+  else if (selectedHotFilter.value === 'other') rows = rows.filter((row) => !row.isHot)
   rows = rows.filter((row) => {
     switch (selectedScoreFilter.value) {
-      case 'skill':
-        return row.inSkill
-      case 'deleted':
-        return row.isDeleted
-      case 'classic':
-        return row.isClassic
-      case 'non-classic':
-        return !row.isClassic && !row.isDeleted
+      case 'skill': return row.inSkill
+      case 'deleted': return row.isDeleted
+      case 'classic': return row.isClassic
+      case 'non-classic': return !row.isClassic && !row.isDeleted
       case 'current':
-      default:
-        return !row.isDeleted
+      default: return !row.isDeleted
     }
   })
-
-  if (normalizedSearch) {
-    rows = rows.filter((row) => row.searchText.includes(normalizedSearch))
-  }
-
+  if (normalizedSearch) rows = rows.filter((row) => row.searchText.includes(normalizedSearch))
   return rows.slice().sort((left, right) => {
     switch (selectedScoreSort.value) {
-      case 'rate':
-        return right.percRaw - left.percRaw || right.skillCalcRaw - left.skillCalcRaw
-      case 'difficulty':
-        return right.difficultyRaw - left.difficultyRaw || right.skillCalcRaw - left.skillCalcRaw
-      case 'skill':
-      default:
-        return right.skillCalcRaw - left.skillCalcRaw || right.percRaw - left.percRaw
+      case 'skill-asc': return left.skillCalcRaw - right.skillCalcRaw || left.percRaw - right.percRaw
+      case 'rate-desc': return right.percRaw - left.percRaw || right.skillCalcRaw - left.skillCalcRaw
+      case 'rate-asc': return left.percRaw - right.percRaw || left.skillCalcRaw - right.skillCalcRaw
+      case 'difficulty-asc': return left.difficultyRaw - right.difficultyRaw || left.skillCalcRaw - right.skillCalcRaw
+      case 'difficulty-desc': return right.difficultyRaw - left.difficultyRaw || right.skillCalcRaw - left.skillCalcRaw
+      case 'skill-desc':
+      default: return right.skillCalcRaw - left.skillCalcRaw || right.percRaw - left.percRaw
     }
   })
 })
-
-const visibleScores = computed(() => {
-  return filteredScores.value.slice(0, visibleScoreCount.value)
-})
-
-const hasMoreScores = computed(() => {
-  return filteredScores.value.length > visibleScores.value.length
-})
-
-const filteredRecent = computed(() => {
-  return filterRecentByFamily(recentRows.value, selectedFamily.value).slice(0, 8)
-})
-
+const visibleScores = computed(() => filteredScores.value.slice(0, visibleScoreCount.value))
+const hasMoreScores = computed(() => filteredScores.value.length > visibleScores.value.length)
+// Keep recent-play data hydrated so the upcoming RECENT PLAYS redesign can reuse the same pipeline.
+const filteredRecent = computed(() => filterRecentByFamily(recentRows.value, selectedFamily.value).slice(0, 8))
+watch(filteredRecent, () => {}, { immediate: true })
 const skillSummary = computed(() => {
-  if (!snapshot.value) {
-    return null
-  }
-
+  if (!snapshot.value) return null
   return {
     gf: rawSkillToText(snapshot.value.gitadoraProfile.gfSkillRaw),
     dm: rawSkillToText(snapshot.value.gitadoraProfile.dmSkillRaw),
   }
 })
+const activeSkillValue = computed(() => skillSummary.value?.[selectedFamily.value] ?? '--')
 
 function setErrorMessage(target: typeof loginError | typeof dataError, error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) {
-    target.value = error.message
-    return
-  }
-
-  target.value = fallback
+  if (error instanceof Error && error.message) target.value = error.message
+  else target.value = fallback
 }
 
 async function hydrateSnapshot() {
   loadingData.value = true
   dataError.value = ''
-
   try {
-    const [nextSnapshot, songs] = await Promise.all([
-      loadBjmaniaGitadoraSnapshot(),
-      loadSongCatalog(),
-    ])
-
+    const [nextSnapshot, songs] = await Promise.all([loadBjmaniaGitadoraSnapshot(), loadSongCatalog()])
     authUser.value = nextSnapshot.authUser
     snapshot.value = nextSnapshot
-    scoreRows.value = mapBestScoresToList(
-      nextSnapshot.bestScores.bestScores,
-      songs,
-      nextSnapshot.hotMusicIds,
-    )
+    scoreRows.value = mapBestScoresToList(nextSnapshot.bestScores.bestScores, songs, nextSnapshot.hotMusicIds)
     recentRows.value = mapRecentPlaysToList(nextSnapshot.recentPlays.recentPlayEntries, songs)
   } catch (error) {
     snapshot.value = null
@@ -183,7 +154,6 @@ async function bootstrapPage() {
   booting.value = true
   loginError.value = ''
   dataError.value = ''
-
   try {
     authUser.value = await getBjmaniaAuthMe()
     await hydrateSnapshot()
@@ -196,27 +166,24 @@ async function bootstrapPage() {
 }
 
 async function handleLogin() {
+  showProfilePanel.value = false
+
   if (isNativeRuntime.value) {
     submitting.value = true
     loginError.value = ''
     dataError.value = ''
-
     try {
       const result = await openBjmaniaNativeLogin()
-
       if (!result.success) {
         try {
           authUser.value = await getBjmaniaAuthMe()
           await hydrateSnapshot()
           return
         } catch {
-          loginError.value = result.cancelled
-            ? 'Login was cancelled before the session could be confirmed.'
-            : 'BJMANIA login did not complete.'
+          loginError.value = result.cancelled ? 'Login was cancelled before the session could be confirmed.' : 'BJMANIA login did not complete.'
           return
         }
       }
-
       authUser.value = await getBjmaniaAuthMe()
       await hydrateSnapshot()
     } catch (error) {
@@ -224,39 +191,20 @@ async function handleLogin() {
     } finally {
       submitting.value = false
     }
-
     return
   }
 
-  if (!loginForm.email.trim() || !loginForm.password) {
-    loginError.value = 'Enter email and password first.'
-    return
-  }
-
-  submitting.value = true
   loginError.value = ''
   dataError.value = ''
-
+  submitting.value = true
   try {
-    const captcha = await requestBjmaniaCaptchaToken()
-
-    await loginBjmania({
-      email: loginForm.email.trim(),
-      password: loginForm.password,
-      remember: loginForm.remember,
-      captcha,
-    })
-
-    authUser.value = await getBjmaniaAuthMe()
-
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(LOGIN_EMAIL_STORAGE_KEY, loginForm.email.trim())
+    if (typeof window === 'undefined') {
+      throw new Error('BJMANIA login redirect is unavailable in this runtime.')
     }
 
-    await hydrateSnapshot()
+    window.location.assign(BJMANIA_BASE_URL)
   } catch (error) {
-    setErrorMessage(loginError, error, 'Login failed.')
-  } finally {
+    setErrorMessage(loginError, error, 'Could not open the BJMANIA login page.')
     submitting.value = false
   }
 }
@@ -269,32 +217,41 @@ async function handleSignOut() {
   recentRows.value = []
   dataError.value = ''
   loginError.value = ''
-  loginForm.password = ''
+  showProfilePanel.value = false
 }
 
-function loadMoreScores() {
-  visibleScoreCount.value += SCORE_PAGE_SIZE
-}
+function loadMoreScores() { visibleScoreCount.value += SCORE_PAGE_SIZE }
+function openFilters() { showProfilePanel.value = false; showFilters.value = true }
+function closeFilters() { showFilters.value = false; openMenu.value = null }
+function toggleFilters() { if (showFilters.value) closeFilters(); else openFilters() }
+function toggleMenu(menu: Exclude<SkillMenu, null>) { openMenu.value = openMenu.value === menu ? null : menu }
+function selectHotFilter(value: BjmaniaScoreHotFilter) { selectedHotFilter.value = value; openMenu.value = null }
+function selectScoreFilter(value: BjmaniaScoreFilterKey) { selectedScoreFilter.value = value; openMenu.value = null }
+function selectScoreSort(value: BjmaniaScoreSortKey) { selectedScoreSort.value = value; openMenu.value = null }
+function submitSearch() { closeFilters(); searchInputRef.value?.blur() }
+async function handleProfileBadgeClick() {
+  showFilters.value = false
+  openMenu.value = null
 
-function formatTimestamp(timestamp: number) {
-  if (!timestamp) {
-    return '--'
+  if (booting.value || submitting.value) {
+    return
   }
 
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(timestamp * 1000))
-}
+  if (!isAuthenticated.value) {
+    await handleLogin()
+    return
+  }
 
-function songTitle(row: BjmaniaScoreListItem | BjmaniaRecentListItem) {
-  return row.song?.displayTitle ?? `Music #${'musicId' in row ? row.musicId : '--'}`
+  showProfilePanel.value = !showProfilePanel.value
 }
-
-function songArtist(row: BjmaniaScoreListItem | BjmaniaRecentListItem) {
-  return row.song?.displayArtist ?? 'Unknown artist'
+function cycleFamily() { selectedFamily.value = selectedFamily.value === 'dm' ? 'gf' : 'dm' }
+function handleDocumentPointerDown(event: PointerEvent) {
+  const target = event.target
+  if (!topShellRef.value || !(target instanceof Node)) return
+  if (!topShellRef.value.contains(target)) {
+    closeFilters()
+    showProfilePanel.value = false
+  }
 }
 
 watch([selectedFamily, selectedHotFilter, selectedScoreFilter, selectedScoreSort, scoreSearch], () => {
@@ -302,571 +259,639 @@ watch([selectedFamily, selectedHotFilter, selectedScoreFilter, selectedScoreSort
 })
 
 onMounted(() => {
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
   void bootstrapPage()
 })
+onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocumentPointerDown))
 </script>
 
 <template>
-  <main class="skill-view">
-    <div class="skill-view__inner">
-      <section class="skill-hero">
-        <div>
-          <p class="skill-hero__eyebrow">BJMANIA / GITADORA</p>
-          <h1>Skill</h1>
-          <p class="skill-hero__copy">
-            Validate login, session, profile, best scores, and recent plays first. We can polish the
-            layout later in Figma.
-          </p>
-        </div>
-
-        <div class="skill-hero__meta">
-          <span class="meta-pill">Platform {{ platformLabel }}</span>
-          <span class="meta-pill">{{ isNativeRuntime ? 'Native HTTP ready' : 'Browser fallback mode' }}</span>
-        </div>
-      </section>
-
-      <section v-if="booting" class="skill-card">
-        <p class="skill-card__eyebrow">Session</p>
-        <h2>Checking current login state...</h2>
-      </section>
-
-      <section v-else-if="!isAuthenticated" class="skill-card skill-card--login">
-        <div class="skill-card__header">
-          <div>
-            <p class="skill-card__eyebrow">Login</p>
-            <h2>Sign in to BJMANIA</h2>
-          </div>
-          <span class="meta-pill meta-pill--light">
-            {{ isNativeRuntime ? 'Native WebView login' : 'Captcha required' }}
-          </span>
-        </div>
-
-        <p v-if="isNativeRuntime" class="skill-login__note">
-          The Android app now opens the real <code>u.bjmania.com/login</code> page inside a native
-          WebView. After login completes there, the app reads the site cookies and reuses them for the
-          native score requests.
-        </p>
-
-        <div v-if="!isNativeRuntime" class="skill-form">
-          <p class="skill-login__note">
-            Browser mode still uses Tencent captcha before posting <code>/api/auth/login</code>.
-            Android should use the native login button below instead.
-          </p>
-
-          <label class="skill-field">
-            <span>Email</span>
-            <input v-model="loginForm.email" autocomplete="username" placeholder="your@email.com" />
-          </label>
-
-          <label class="skill-field">
-            <span>Password</span>
+  <section class="skill-view">
+    <header ref="topShellRef" class="top-shell">
+      <div class="top-shell__purple">
+        <div class="top-shell__bar top-shell__bar--skill">
+          <label class="search-shell">
             <input
-              v-model="loginForm.password"
-              type="password"
-              autocomplete="current-password"
-              placeholder="password"
-              @keydown.enter.prevent="handleLogin"
+              ref="searchInputRef"
+              v-model="scoreSearch"
+              class="search-shell__input"
+              type="search"
+              placeholder="搜索曲名 / 艺术家 / ID"
+              @click="openFilters"
+              @focus="openFilters"
+              @keydown.enter.prevent="submitSearch"
             />
+            <button class="search-shell__button" type="button" :aria-label="showFilters ? '收起筛选面板' : '展开筛选面板'" @click="toggleFilters">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16L21 21"></path></svg>
+            </button>
           </label>
 
-          <label class="skill-checkbox">
-            <input v-model="loginForm.remember" type="checkbox" />
-            <span>Remember this session</span>
-          </label>
-        </div>
-
-        <p v-if="loginError" class="skill-message skill-message--error">{{ loginError }}</p>
-        <p v-if="dataError" class="skill-message skill-message--error">{{ dataError }}</p>
-
-        <div class="skill-card__actions">
-          <button class="action-button" :disabled="submitting" @click="handleLogin">
-            {{
-              submitting
-                ? (isNativeRuntime ? 'Opening login...' : 'Verifying...')
-                : (isNativeRuntime ? 'Open BJMANIA Login' : 'Verify and Sign In')
-            }}
+          <button class="profile-badge" type="button" :aria-label="isAuthenticated ? '打开 BJMANIA Profile 面板' : '打开 BJMANIA 登录页面'" @click="handleProfileBadgeClick">
+            <span v-if="isAuthenticated" class="profile-badge__initial">{{ avatarBadgeLabel }}</span>
+            <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 12C14.4853 12 16.5 9.98528 16.5 7.5C16.5 5.01472 14.4853 3 12 3C9.51472 3 7.5 5.01472 7.5 7.5C7.5 9.98528 9.51472 12 12 12Z"></path>
+              <path d="M4 20C4.83333 17.1667 7.5 15.75 12 15.75C16.5 15.75 19.1667 17.1667 20 20"></path>
+            </svg>
           </button>
         </div>
-      </section>
+      </div>
 
-      <template v-else>
-        <section class="skill-card skill-card--profile">
-          <div class="skill-card__header">
-            <div>
-              <p class="skill-card__eyebrow">Profile</p>
-              <h2>{{ snapshot?.gitadoraProfile.name || authUser?.name }}</h2>
-              <p class="skill-profile__title">{{ snapshot?.gitadoraProfile.title || 'No title' }}</p>
-            </div>
-
-            <div class="skill-card__actions">
-              <button class="action-button action-button--muted" @click="handleSignOut">Sign out</button>
-            </div>
-          </div>
-
-          <div class="skill-profile__stats">
-            <article class="skill-stat">
-              <span class="skill-stat__label">DM Skill</span>
-              <strong>{{ skillSummary?.dm ?? '--' }}</strong>
-            </article>
-            <article class="skill-stat">
-              <span class="skill-stat__label">GF Skill</span>
-              <strong>{{ skillSummary?.gf ?? '--' }}</strong>
-            </article>
-          </div>
-        </section>
-
-        <section class="skill-card">
-          <div class="skill-card__header">
-            <div>
-              <p class="skill-card__eyebrow">Category</p>
-              <h2>Score list</h2>
-            </div>
-          </div>
-
-          <div class="instrument-tabs" role="tablist" aria-label="Category">
-            <button
-              v-for="(label, family) in FAMILY_LABELS"
-              :key="family"
-              class="instrument-tabs__item"
-              :class="{ 'instrument-tabs__item--active': selectedFamily === family }"
-              @click="selectedFamily = family"
-            >
-              {{ label }}
-            </button>
-          </div>
-
-          <div class="score-filters">
-            <label class="skill-field">
-              <span>Search</span>
-              <input v-model="scoreSearch" placeholder="Song title / artist / ID" />
-            </label>
-
-            <div class="score-filters__grid">
-              <label class="skill-field">
-                <span>Hot</span>
-                <select v-model="selectedHotFilter">
-                  <option v-for="option in HOT_FILTER_OPTIONS" :key="option.value" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
-              </label>
-
-              <label class="skill-field">
-                <span>List</span>
-                <select v-model="selectedScoreFilter">
-                  <option v-for="option in SCORE_FILTER_OPTIONS" :key="option.value" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
-              </label>
-            </div>
-
-            <label class="skill-field">
-              <span>Sort</span>
-              <select v-model="selectedScoreSort">
-                <option v-for="option in SCORE_SORT_OPTIONS" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-          </div>
-
-          <p v-if="loadingData" class="skill-message">Loading live GITADORA data...</p>
-          <p v-else-if="dataError" class="skill-message skill-message--error">{{ dataError }}</p>
-
-          <div v-else class="score-list">
-            <article v-for="row in visibleScores" :key="`${row.musicId}-${row.instrument}-${row.level}`" class="score-row">
-              <div class="score-row__main">
-                <div class="score-row__title">
-                  <h3>{{ songTitle(row) }}</h3>
-                  <p>{{ songArtist(row) }}</p>
-                </div>
-
-                <div class="score-row__meta">
-                  <span v-if="row.branchLabel" class="meta-pill meta-pill--light">{{ row.branchLabel }}</span>
-                  <span class="meta-pill meta-pill--light">{{ row.sheetLabel }}</span>
-                  <span v-if="row.isHot" class="meta-pill meta-pill--hot">HOT</span>
-                  <span v-if="row.inSkill" class="meta-pill meta-pill--skill">IN SKILL</span>
-                  <span class="meta-pill">{{ row.rankLabel }}</span>
-                </div>
-              </div>
-
-              <div class="score-row__stats">
-                <div>
-                  <span class="score-row__stat-label">Skill</span>
-                  <strong>{{ row.skillCalcText }}</strong>
-                </div>
-                <div>
-                  <span class="score-row__stat-label">Rate</span>
-                  <strong>{{ row.percText }}</strong>
-                </div>
-                <div>
-                  <span class="score-row__stat-label">Difficulty</span>
-                  <strong>{{ row.difficultyText }}</strong>
-                </div>
-              </div>
-
-              <div class="score-row__badges">
-                <span v-if="row.clear" class="tag-chip tag-chip--soft">CLEAR</span>
-                <span v-if="row.fullCombo" class="tag-chip tag-chip--soft">FC</span>
-                <span v-if="row.excellent" class="tag-chip tag-chip--soft">EXC</span>
-                <span v-if="row.isClassic" class="tag-chip tag-chip--soft">CLASSIC</span>
-                <span v-if="row.isDeleted" class="tag-chip tag-chip--soft">DELETED</span>
-              </div>
-            </article>
-
-            <p v-if="!visibleScores.length" class="skill-message">
-              No scores found for {{ FAMILY_LABELS[selectedFamily] }}.
-            </p>
-
-            <div v-if="hasMoreScores" class="score-list__more">
-              <button class="action-button action-button--muted" @click="loadMoreScores">
-                Load 50 more
+      <transition name="panel-fade">
+        <section v-if="showFilters" class="filter-drawer">
+          <div class="filter-drawer__controls">
+            <div class="pill-menu">
+              <button class="pill-menu__button" :class="{ 'pill-menu__button--filled': selectedHotFilter !== 'all' }" type="button" :title="selectedHotLabel" :aria-label="`Hot 过滤，当前 ${selectedHotLabel}`" :aria-expanded="openMenu === 'hot'" @click.stop="toggleMenu('hot')">
+                <span class="pill-menu__label">Hot</span>
+                <span class="pill-menu__icon" aria-hidden="true"><svg viewBox="0 0 18 18"><path d="M4 7L9 12L14 7"></path></svg></span>
               </button>
+              <transition name="menu-fade">
+                <div v-if="openMenu === 'hot'" class="pill-menu__sheet">
+                  <button v-for="option in HOT_FILTER_OPTIONS" :key="option.value" class="pill-menu__option" :class="{ 'pill-menu__option--active': selectedHotFilter === option.value }" type="button" @click="selectHotFilter(option.value)">{{ option.label }}</button>
+                </div>
+              </transition>
+            </div>
+
+            <div class="pill-menu pill-menu--filter">
+              <button class="pill-menu__button" :class="{ 'pill-menu__button--filled': selectedScoreFilter !== 'current' }" type="button" :title="selectedScoreFilterLabel" :aria-label="`曲目筛选，当前 ${selectedScoreFilterLabel}`" :aria-expanded="openMenu === 'filter'" @click.stop="toggleMenu('filter')">
+                <span class="pill-menu__label">筛选</span>
+                <span class="pill-menu__icon" aria-hidden="true"><svg viewBox="0 0 18 18"><path d="M4 7L9 12L14 7"></path></svg></span>
+              </button>
+              <transition name="menu-fade">
+                <div v-if="openMenu === 'filter'" class="pill-menu__sheet">
+                  <button v-for="option in SCORE_FILTER_OPTIONS" :key="option.value" class="pill-menu__option" :class="{ 'pill-menu__option--active': selectedScoreFilter === option.value }" type="button" @click="selectScoreFilter(option.value)">{{ option.label }}</button>
+                </div>
+              </transition>
+            </div>
+
+            <div class="pill-menu pill-menu--sort">
+              <button class="pill-menu__button" :class="{ 'pill-menu__button--filled': selectedScoreSort !== 'skill-desc' }" type="button" :title="selectedScoreSortLabel" :aria-label="`排序方式，当前 ${selectedScoreSortLabel}`" :aria-expanded="openMenu === 'sort'" @click.stop="toggleMenu('sort')">
+                <span class="pill-menu__label">排序</span>
+                <span class="pill-menu__icon" aria-hidden="true"><svg viewBox="0 0 18 18"><path d="M4 7L9 12L14 7"></path></svg></span>
+              </button>
+              <transition name="menu-fade">
+                <div v-if="openMenu === 'sort'" class="pill-menu__sheet">
+                  <button v-for="option in SCORE_SORT_OPTIONS" :key="option.value" class="pill-menu__option" :class="{ 'pill-menu__option--active': selectedScoreSort === option.value }" type="button" @click="selectScoreSort(option.value)">{{ option.label }}</button>
+                </div>
+              </transition>
             </div>
           </div>
         </section>
+      </transition>
 
-        <section class="skill-card">
-          <div class="skill-card__header">
-            <div>
-              <p class="skill-card__eyebrow">Recent plays</p>
-              <h2>Latest activity</h2>
+      <transition name="menu-fade">
+        <div v-if="showProfilePanel && isAuthenticated" class="profile-flyout-shell">
+          <section class="profile-flyout">
+            <SkillProfileBoard
+              v-if="snapshot"
+              :display-name="snapshot.gitadoraProfile.name || authUser?.name || 'BJMANIA'"
+              :title="snapshot.gitadoraProfile.title || 'No title'"
+              :mode-label="FAMILY_LABELS[selectedFamily]"
+              :skill-value="activeSkillValue"
+              @sign-out="handleSignOut"
+            />
+            <div v-else class="profile-panel-card profile-panel-card--state">
+              <p class="profile-panel-card__eyebrow">BJMANIA</p>
+              <h2>档案读取失败</h2>
+              <p>{{ dataError || '登录态已确认，但技能数据暂时不可用。' }}</p>
+              <div class="profile-panel-card__actions">
+                <button class="profile-panel-card__button" type="button" @click="hydrateSnapshot">Retry</button>
+                <button class="profile-panel-card__button profile-panel-card__button--muted" type="button" @click="handleSignOut">Sign out</button>
+              </div>
             </div>
-          </div>
+          </section>
+        </div>
+      </transition>
+    </header>
 
-          <div class="recent-list">
-            <article v-for="entry in filteredRecent" :key="`${entry.timestamp}-${entry.sheetLabel}-${songTitle(entry)}`" class="recent-row">
-              <div>
-                <h3>{{ songTitle(entry) }}</h3>
-                <p>{{ songArtist(entry) }}</p>
-              </div>
-
-              <div class="recent-row__side">
-                <span v-if="entry.branchLabel" class="meta-pill meta-pill--light">{{ entry.branchLabel }}</span>
-                <span class="meta-pill meta-pill--light">{{ entry.sheetLabel }}</span>
-                <span class="recent-row__time">{{ formatTimestamp(entry.timestamp) }}</span>
-                <span class="recent-row__score">{{ entry.percText }} / {{ entry.rankLabel }}</span>
-              </div>
-            </article>
-
-            <p v-if="!filteredRecent.length" class="skill-message">
-              No recent plays detected for {{ FAMILY_LABELS[selectedFamily] }}.
-            </p>
-          </div>
-        </section>
-      </template>
+    <div class="skill-view__inner">
+      <section class="skill-list">
+        <div v-if="booting" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>Checking BJMANIA session...</h2></div>
+        <div v-else-if="!isAuthenticated" class="state-card state-card--centered">
+          <p>暂无账号信息，请先点击右上角头像登录</p>
+          <p v-if="submitting" class="state-card__message">正在打开 BJMANIA 登录...</p>
+          <p v-if="loginError" class="state-card__message state-card__message--error">{{ loginError }}</p>
+          <p v-if="dataError" class="state-card__message state-card__message--error">{{ dataError }}</p>
+        </div>
+        <div v-else-if="loadingData" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>Loading live GITADORA data...</h2></div>
+        <div v-else-if="dataError" class="state-card state-card--error"><p class="state-card__eyebrow">BJMANIA</p><h2>数据拉取失败</h2><p>{{ dataError }}</p><button class="state-card__button" type="button" @click="hydrateSnapshot">Retry</button></div>
+        <template v-else>
+          <SkillScoreCard v-for="row in visibleScores" :key="`${row.musicId}-${row.instrument}-${row.level}`" :row="row" />
+          <div v-if="!visibleScores.length" class="state-card"><p class="state-card__eyebrow">Filter</p><h2>没有匹配到成绩</h2><p>当前筛选条件下没有 {{ FAMILY_LABELS[selectedFamily] }} 成绩记录。</p></div>
+          <div v-if="hasMoreScores" class="load-more-card"><p>继续加载更多 skill 成绩</p><button class="load-more-card__button" type="button" @click="loadMoreScores">Load 50 more</button></div>
+        </template>
+      </section>
     </div>
-  </main>
+
+    <button class="family-fab" type="button" :aria-label="`切换 skill 模式，当前 ${FAMILY_LABELS[selectedFamily]}`" @click="cycleFamily">
+      <img class="family-fab__image" :src="selectedFamilyToggleSrc" alt="" aria-hidden="true" />
+    </button>
+  </section>
 </template>
 
 <style scoped>
 .skill-view {
+  position: relative;
   min-height: 100vh;
-  padding: 18px 14px 0;
 }
 
 .skill-view__inner {
-  display: grid;
-  gap: 16px;
-  width: min(100%, 420px);
-  margin: 0 auto;
-}
-
-.skill-hero,
-.skill-card {
   position: relative;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 22px;
-  background: rgba(18, 13, 35, 0.84);
-  box-shadow: 0 20px 40px rgba(7, 6, 18, 0.24);
-  backdrop-filter: blur(18px);
+  z-index: 2;
+  width: min(100%, 403px);
+  margin: 0 auto;
+  padding: 148px 14px 44px;
 }
 
-.skill-hero {
+.top-shell {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
+}
+
+.top-shell__purple {
+  background: #4b3b76;
+}
+
+.top-shell__bar {
+  width: min(100%, 402px);
+  margin: 0 auto;
+  padding: 63px 11px 15px;
+}
+
+.top-shell__bar--skill {
   display: grid;
-  gap: 14px;
-  padding: 22px 18px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
 }
 
-.skill-hero__eyebrow,
-.skill-card__eyebrow {
-  margin: 0 0 8px;
-  color: rgba(190, 183, 214, 0.84);
+.search-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 47px;
+  padding-left: 4px;
+  border-radius: 28px;
+  background: #ece6f0;
+  overflow: hidden;
+}
+
+.search-shell__input {
+  min-height: 47px;
+  padding: 4px 20px 4px 20px;
+  border: 0;
+  background: transparent;
+  color: #49454f;
+  box-shadow: none;
+  font-family: 'Roboto', var(--font-sans);
+  font-size: 16px;
+  letter-spacing: 0.03em;
+}
+
+.search-shell__input::placeholder {
+  color: #6b6670;
+}
+
+.search-shell__input:focus {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.search-shell__button,
+.profile-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #49454f;
+  cursor: pointer;
+}
+
+.search-shell__button svg,
+.profile-badge svg,
+.family-fab svg,
+.pill-menu__icon svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.profile-badge {
+  flex: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #65558f;
+  box-shadow: 0 4px 10px rgba(39, 28, 78, 0.18);
+}
+
+.profile-badge__initial {
+  color: #4f378a;
   font-family: var(--font-display);
-  font-size: 0.68rem;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.filter-drawer {
+  width: min(100%, 402px);
+  margin: 0 auto;
+  padding: 14px 11px 0;
+}
+
+.profile-flyout-shell {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  padding-top: 10px;
+  pointer-events: none;
+}
+
+.filter-drawer {
+  background: #ffffff;
+  padding-bottom: 22px;
+}
+
+.filter-drawer__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(100%, 360px);
+  min-height: 38px;
+  margin: 0 auto;
+  gap: 0;
+  flex-wrap: nowrap;
+}
+
+.pill-menu {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 108px;
+  width: 108px;
+  min-width: 108px;
+}
+
+.pill-menu__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  align-items: center;
+  width: 100%;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 18px;
+  border: 1px solid #4f378a;
+  border-radius: 25px;
+  background: #ffffff;
+  color: #4f378a;
+  box-shadow: none;
+  font-family: 'Roboto', var(--font-sans);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.pill-menu__button--filled {
+  background: rgba(232, 222, 248, 0.38);
+}
+
+.pill-menu__label {
+  font-weight: 500;
+  line-height: 20px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.pill-menu__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: #4f378a;
+}
+
+.pill-menu__icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.7;
+}
+
+.pill-menu__sheet {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  right: 0;
+  min-width: 108px;
+  max-height: 280px;
+  padding: 8px;
+  overflow-y: auto;
+  border: 1px solid rgba(79, 55, 138, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow:
+    0 18px 40px rgba(43, 29, 85, 0.18),
+    0 6px 18px rgba(43, 29, 85, 0.1);
+}
+
+.pill-menu--filter .pill-menu__sheet {
+  width: 172px;
+  min-width: 172px;
+  left: 0;
+  right: auto;
+}
+
+.pill-menu--sort .pill-menu__sheet {
+  width: 184px;
+  min-width: 184px;
+  left: auto;
+  right: 0;
+}
+
+.pill-menu__option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #4f378a;
+  font-family: 'Roboto', var(--font-sans);
+  font-size: 0.92rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pill-menu__option:hover {
+  background: rgba(232, 222, 248, 0.72);
+}
+
+.pill-menu__option--active {
+  background: #e8def8;
+  color: #39256b;
+  font-weight: 500;
+}
+
+.profile-flyout-shell {
+  display: flex;
+  justify-content: center;
+}
+
+.profile-flyout {
+  display: flex;
+  justify-content: flex-end;
+  width: min(100%, 402px);
+  margin: 0 auto;
+  padding: 0 11px;
+  pointer-events: auto;
+}
+
+.profile-panel-card,
+.profile-login,
+.state-card,
+.load-more-card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 2px solid rgba(47, 0, 178, 0.72);
+  border-radius: 18px;
+  background: rgba(232, 229, 241, 0.9);
+  box-shadow: 0 10px 24px rgba(36, 24, 88, 0.12);
+}
+
+.profile-panel-card,
+.profile-login {
+  border-width: 1.6px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 36px rgba(46, 29, 104, 0.18);
+}
+
+.profile-panel-card--state {
+  color: #1d1741;
+}
+
+.profile-panel-card__eyebrow,
+.profile-login__eyebrow,
+.state-card__eyebrow {
+  margin: 0;
+  color: rgba(79, 55, 138, 0.74);
+  font-family: var(--font-display);
+  font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
-.skill-hero h1,
-.skill-card h2 {
+.profile-panel-card h2,
+.profile-login h2,
+.state-card h2 {
   margin: 0;
-  color: var(--ink);
-  font-size: 1.8rem;
+  color: #1d1741;
+  font-size: 1.35rem;
+  line-height: 1.15;
 }
 
-.skill-hero__copy,
-.skill-login__note,
-.skill-profile__title,
-.skill-message,
-.score-row__title p,
-.recent-row p,
-.recent-row__time {
+.profile-panel-card p,
+.profile-login__note,
+.profile-login__message,
+.state-card p,
+.load-more-card p {
   margin: 0;
-  color: rgba(236, 232, 250, 0.68);
+  color: rgba(63, 54, 89, 0.9);
   line-height: 1.5;
 }
 
-.skill-hero__meta {
+.profile-panel-card__actions {
   display: flex;
+  gap: 8px;
   flex-wrap: wrap;
+}
+
+.profile-panel-card__button,
+.profile-login__submit,
+.state-card__button,
+.load-more-card__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid #4f378a;
+  border-radius: 999px;
+  background: #4f378a;
+  color: #ffffff;
+  box-shadow: none;
+  cursor: pointer;
+  font-family: 'Roboto', var(--font-sans);
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+
+.profile-panel-card__button--muted {
+  background: transparent;
+  color: #4f378a;
+}
+
+.profile-login__form {
+  display: grid;
+  gap: 10px;
+}
+
+.profile-login__field {
+  display: grid;
+  gap: 6px;
+}
+
+.profile-login__field span,
+.profile-login__checkbox span {
+  color: #433d4d;
+  font-size: 0.88rem;
+}
+
+.profile-login__field input {
+  min-height: 44px;
+  border: 1px solid rgba(79, 55, 138, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1d1741;
+  box-shadow: none;
+  font-size: 16px;
+}
+
+.profile-login__field input:focus {
+  border-color: rgba(79, 55, 138, 0.38);
+  box-shadow: 0 0 0 3px rgba(79, 55, 138, 0.08);
+  background: #ffffff;
+}
+
+.profile-login__checkbox {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
 }
 
-.meta-pill--light {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.skill-card {
-  display: grid;
-  gap: 16px;
-  padding: 18px;
-}
-
-.skill-card__header,
-.skill-card__actions {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.skill-form {
-  display: grid;
-  gap: 12px;
-}
-
-.skill-field {
-  display: grid;
-  gap: 6px;
-  color: var(--ink);
-}
-
-.skill-field span,
-.skill-checkbox span {
-  font-size: 0.9rem;
-}
-
-.skill-field input,
-.skill-field select {
-  min-height: 44px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--ink);
-  padding: 0 14px;
-}
-
-.skill-checkbox {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  color: rgba(236, 232, 250, 0.84);
-}
-
-.skill-checkbox input {
+.profile-login__checkbox input {
   width: 18px;
   min-height: 18px;
   margin: 0;
 }
 
-.skill-message--error {
-  color: #ff9fb7;
+.profile-login__message--error {
+  color: #b3261e;
 }
 
-.skill-profile__stats {
+.skill-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 22px;
+  width: min(100%, 375px);
+  margin: 0 auto;
 }
 
-.skill-stat {
-  display: grid;
-  gap: 6px;
-  padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
+.state-card--error {
+  border-color: rgba(179, 38, 30, 0.32);
 }
 
-.skill-stat__label,
-.score-row__stat-label {
-  color: rgba(190, 183, 214, 0.74);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.state-card--centered {
+  justify-items: center;
+  text-align: center;
 }
 
-.skill-stat strong,
-.score-row__stats strong,
-.recent-row__score {
-  color: var(--ink);
-  font-size: 1.05rem;
+.state-card__message {
+  max-width: 22rem;
 }
 
-.instrument-tabs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+.state-card__message--error {
+  color: #b3261e;
 }
 
-.instrument-tabs__item {
-  min-height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+.load-more-card {
+  justify-items: center;
+}
+
+.load-more-card p {
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+}
+
+.family-fab {
+  position: fixed;
+  right: 14px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+  z-index: 32;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(236, 232, 250, 0.72);
+  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
   cursor: pointer;
 }
 
-.instrument-tabs__item--active {
-  border-color: rgba(255, 159, 74, 0.52);
-  background: rgba(255, 159, 74, 0.14);
-  color: var(--accent-strong);
+.family-fab__image {
+  display: block;
+  width: 56px;
+  height: 56px;
 }
 
-.score-filters {
-  display: grid;
-  gap: 12px;
+.panel-fade-enter-active,
+.panel-fade-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
-.score-filters__grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+.panel-fade-enter-from,
+.panel-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
-.score-list,
-.recent-list {
-  display: grid;
-  gap: 10px;
+.menu-fade-enter-active,
+.menu-fade-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
 }
 
-.score-row,
-.recent-row {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 
-.score-row__main,
-.score-row__stats,
-.recent-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+@media (max-width: 720px) {
+  .filter-drawer__controls {
+    width: 100%;
+  }
 }
 
-.score-row__title,
-.recent-row > div:first-child {
-  min-width: 0;
-}
+@media (max-width: 440px) {
+  .skill-view__inner {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
 
-.score-row__title h3,
-.recent-row h3 {
-  margin: 0 0 4px;
-  color: var(--ink);
-  font-family: var(--font-figma-title);
-  font-size: 1rem;
-}
-
-.score-row__meta,
-.score-row__badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.score-row__stats {
-  justify-content: flex-start;
-}
-
-.score-row__stats > div {
-  display: grid;
-  gap: 4px;
-  min-width: 92px;
-}
-
-.tag-chip--soft {
-  min-height: 24px;
-  padding: 0 8px;
-  background: rgba(162, 150, 252, 0.14);
-  border-color: rgba(162, 150, 252, 0.3);
-  color: #ddd5ff;
-}
-
-.meta-pill--hot {
-  background: rgba(255, 159, 74, 0.2);
-  color: #ffd3a7;
-}
-
-.meta-pill--skill {
-  background: rgba(127, 228, 174, 0.18);
-  color: #c9ffdd;
-}
-
-.score-list__more {
-  display: flex;
-  justify-content: center;
-  padding-top: 4px;
-}
-
-.recent-row__side {
-  display: grid;
-  justify-items: end;
-  gap: 6px;
-  text-align: right;
-}
-
-@media (max-width: 380px) {
-  .skill-view {
+  .top-shell__bar,
+  .filter-drawer,
+  .profile-flyout {
     padding-left: 10px;
     padding-right: 10px;
   }
 
-  .skill-card,
-  .skill-hero {
-    padding: 16px;
-  }
-
-  .skill-profile__stats {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .score-row__main,
-  .score-row__stats,
-  .recent-row {
-    flex-direction: column;
-  }
-
-  .score-filters__grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .score-row__meta,
-  .score-row__badges,
-  .recent-row__side {
-    justify-content: flex-start;
-    justify-items: start;
-    text-align: left;
-  }
 }
 </style>
