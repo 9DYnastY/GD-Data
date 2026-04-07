@@ -4,6 +4,7 @@ import boardBackgroundSrc from '../assets/skill-page/Player_Board/background.svg
 import b50ButtonSrc from '../assets/skill-page/Player_Board/b50_button.svg'
 import logoutButtonSrc from '../assets/skill-page/Player_Board/logout_button.svg'
 import skillIconSrc from '../assets/skill-page/Player_Board/Skill_icon.svg'
+import { resolveSkillToneStyle, splitSkillValueText } from '../lib/skill-tone'
 
 const BOARD_WIDTH = 263
 const BOARD_HEIGHT = 202
@@ -16,6 +17,7 @@ const props = defineProps<{
 }>()
 
 defineEmits<{
+  generateB50: []
   signOut: []
 }>()
 
@@ -23,24 +25,8 @@ const boardRoot = ref<HTMLElement | null>(null)
 const boardScale = ref(1)
 let boardResizeObserver: ResizeObserver | null = null
 
-function splitSkillValue(value: string) {
-  const normalized = value.trim()
-  const match = normalized.match(/^([+-]?\d+)(\.\d+)?$/)
-
-  if (!match) {
-    return {
-      whole: normalized || '--',
-      fraction: '',
-    }
-  }
-
-  return {
-    whole: match[1],
-    fraction: match[2] ?? '',
-  }
-}
-
-const skillValueParts = computed(() => splitSkillValue(props.skillValue))
+const skillValueParts = computed(() => splitSkillValueText(props.skillValue))
+const skillToneStyle = computed(() => resolveSkillToneStyle(props.skillValue))
 
 function updateBoardScale() {
   if (!boardRoot.value) {
@@ -89,7 +75,7 @@ onBeforeUnmount(() => {
 
         <div class="skill-profile-board__player-info">
           <p class="skill-profile-board__title">{{ props.title || 'No title' }}</p>
-          <h3 :title="props.displayName">{{ props.displayName }}</h3>
+          <h3 :title="props.displayName" :style="skillToneStyle">{{ props.displayName }}</h3>
         </div>
 
         <div class="skill-profile-board__divider" aria-hidden="true"></div>
@@ -101,7 +87,7 @@ onBeforeUnmount(() => {
             alt=""
             aria-hidden="true"
           />
-          <strong class="skill-profile-board__skill-value">
+          <strong class="skill-profile-board__skill-value" :style="skillToneStyle">
             <span class="skill-profile-board__skill-whole">{{ skillValueParts.whole }}</span>
             <span
               v-if="skillValueParts.fraction"
@@ -117,6 +103,7 @@ onBeforeUnmount(() => {
           type="button"
           aria-label="Generate B50"
           title="Generate B50"
+          @click="$emit('generateB50')"
         >
           <img :src="b50ButtonSrc" alt="" aria-hidden="true" />
           <span>生成B50</span>
@@ -187,10 +174,6 @@ onBeforeUnmount(() => {
 .skill-profile-board__player-info h3,
 .skill-profile-board__skill-value {
   margin: 0;
-  background: linear-gradient(180deg, #ff00bf -212.16%, #ffffff 220.27%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
 }
 
 .skill-profile-board__title {
@@ -259,7 +242,7 @@ onBeforeUnmount(() => {
 .skill-profile-board__skill-value {
   position: absolute;
   top: 0.15px;
-  left: 68.83px;
+  left: 72px;
   display: flex;
   align-items: baseline;
   min-width: 109px;

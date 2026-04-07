@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import DifficultyGrid from '../components/DifficultyGrid.vue'
+import LazyCoverImage from '../components/LazyCoverImage.vue'
 import { loadSongByMusicId } from '../lib/song-catalog'
 import type { SongViewModel } from '../types/song'
 
@@ -74,10 +75,14 @@ onMounted(loadCurrentSong)
     <template v-else-if="song">
       <section class="detail-hero">
         <div class="detail-hero__cover">
-          <img
+          <LazyCoverImage
             v-if="song.heroImageUrl"
+            class="detail-hero__cover-image"
             :src="song.heroImageUrl"
+            :cache-key="song.heroImageCacheKey"
             :alt="`${song.displayTitle} cover`"
+            :fallback-text="song.imageFallback"
+            :eager="true"
           />
           <span v-else>{{ song.imageFallback }}</span>
         </div>
@@ -253,7 +258,14 @@ onMounted(loadCurrentSong)
   letter-spacing: 0.08em;
 }
 
-.detail-hero__cover img {
+.detail-hero__cover :deep(.lazy-cover.detail-hero__cover-image) {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  aspect-ratio: auto;
+}
+
+.detail-hero__cover :deep(img) {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -441,6 +453,10 @@ onMounted(loadCurrentSong)
   }
 
   .detail-hero__cover {
+    min-height: 220px;
+  }
+
+  .detail-hero__cover :deep(.lazy-cover.detail-hero__cover-image) {
     min-height: 220px;
   }
 }

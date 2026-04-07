@@ -20,6 +20,11 @@ const router = createRouter({
       },
     },
     {
+      path: '/skill/b50',
+      name: 'skill-b50',
+      component: () => import('../views/B50View.vue'),
+    },
+    {
       path: '/song/:musicId',
       name: 'song-detail',
       component: () => import('../views/SongDetailView.vue'),

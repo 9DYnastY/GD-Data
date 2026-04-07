@@ -100,6 +100,7 @@ const title = computed(() => {
 })
 
 const coverSrc = computed(() => props.row.song?.heroImageUrl ?? null)
+const coverCacheKey = computed(() => props.row.song?.heroImageCacheKey ?? null)
 const coverFallback = computed(() => props.row.song?.imageFallback ?? String(props.row.musicId))
 const levelColor = computed(() => LEVEL_COLORS[props.row.level])
 const instrumentLabel = computed(() => {
@@ -170,6 +171,7 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
           <LazyCoverImage
             class="skill-score-card__cover"
             :src="coverSrc"
+            :cache-key="coverCacheKey"
             :alt="`${title} cover`"
             :fallback-text="coverFallback"
           />

@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.gddata.gitadora',
-  appName: 'GITADORA Song Browser',
+  appName: 'GD Data',
   webDir: 'dist'
 };
 

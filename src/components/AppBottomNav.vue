@@ -5,7 +5,7 @@ import { RouterLink, useRoute } from 'vue-router'
 const route = useRoute()
 
 const items = [
-  { name: 'home', label: 'Song List', to: '/' },
+  { name: 'home', label: '歌曲列表', to: '/' },
   { name: 'skill', label: 'SKILL', to: '/skill' },
 ]
 
@@ -20,6 +20,7 @@ const activeName = computed(() => String(route.name ?? ''))
       class="bottom-nav__item"
       :class="{ 'bottom-nav__item--active': activeName === item.name }"
       :to="item.to"
+      replace
     >
       <span class="bottom-nav__icon-badge" aria-hidden="true">
         <svg v-if="item.name === 'home'" viewBox="0 0 24 24">

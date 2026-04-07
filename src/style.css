@@ -8,6 +8,14 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: 'SFTheraminGothicBold';
+  src: url('/fonts/SF-Theramin-Gothic-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #0a0a0f;
   --bg-overlay: rgba(10, 10, 15, 0.78);
@@ -35,6 +43,7 @@
     'Century Gothic',
     'Trebuchet MS',
     sans-serif;
+  --font-b50-poster: 'SFTheraminGothicBold', 'Arial Narrow', sans-serif;
   color: var(--muted);
   background: var(--bg);
   font-family: var(--font-sans);

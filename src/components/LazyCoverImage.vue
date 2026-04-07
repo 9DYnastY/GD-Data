@@ -1,32 +1,69 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { resolveCoverImageSource, shouldUseNativeCoverCache } from '../lib/cover-cache'
 
 const props = defineProps<{
   src: string | null
+  cacheKey?: string | null
   alt: string
   fallbackText: string
+  eager?: boolean
 }>()
 
 const host = ref<HTMLElement | null>(null)
 const shouldLoad = ref(false)
 const hasError = ref(false)
+const resolvedSrc = ref<string | null>(null)
 let observer: IntersectionObserver | null = null
+let resolveSequence = 0
 
-function enableImage() {
-  shouldLoad.value = true
+function disconnectObserver() {
   observer?.disconnect()
   observer = null
 }
 
-onMounted(() => {
-  if (!props.src) {
+async function resolveImageSource() {
+  const currentSequence = ++resolveSequence
+
+  if (!shouldLoad.value || !props.src) {
+    resolvedSrc.value = null
     return
   }
 
-  if (typeof IntersectionObserver === 'undefined') {
-    enableImage()
+  hasError.value = false
+
+  if (!shouldUseNativeCoverCache(props.src, props.cacheKey)) {
+    resolvedSrc.value = props.src
     return
   }
+
+  resolvedSrc.value = null
+  const nextSource = await resolveCoverImageSource(props.src, props.cacheKey)
+
+  if (currentSequence !== resolveSequence) {
+    return
+  }
+
+  resolvedSrc.value = nextSource
+}
+
+function enableImage() {
+  if (shouldLoad.value) {
+    void resolveImageSource()
+    return
+  }
+
+  shouldLoad.value = true
+  disconnectObserver()
+  void resolveImageSource()
+}
+
+function observeImage() {
+  if (!host.value || shouldLoad.value || !props.src) {
+    return
+  }
+
+  disconnectObserver()
 
   observer = new IntersectionObserver(
     (entries) => {
@@ -41,27 +78,55 @@ onMounted(() => {
     },
   )
 
-  if (host.value) {
-    observer.observe(host.value)
+  observer.observe(host.value)
+}
+
+function syncImageLifecycle() {
+  if (!props.src) {
+    resolveSequence += 1
+    resolvedSrc.value = null
+    hasError.value = false
+    disconnectObserver()
+    return
   }
+
+  if (props.eager || typeof IntersectionObserver === 'undefined') {
+    enableImage()
+    return
+  }
+
+  if (shouldLoad.value) {
+    void resolveImageSource()
+    return
+  }
+
+  observeImage()
+}
+
+onMounted(syncImageLifecycle)
+
+watch([() => props.src, () => props.cacheKey, () => props.eager], () => {
+  hasError.value = false
+  syncImageLifecycle()
 })
 
 onBeforeUnmount(() => {
-  observer?.disconnect()
+  disconnectObserver()
 })
 </script>
 
 <template>
   <div ref="host" class="lazy-cover">
     <img
-      v-if="src && shouldLoad && !hasError"
-      :src="src"
+      v-if="resolvedSrc && shouldLoad && !hasError"
+      :src="resolvedSrc"
       :alt="alt"
       decoding="async"
-      fetchpriority="low"
+      :fetchpriority="eager ? 'high' : 'low'"
+      :loading="eager ? 'eager' : 'lazy'"
       @error="hasError = true"
     />
-    <span v-else>{{ fallbackText }}</span>
+    <span v-else-if="!src || hasError">{{ fallbackText }}</span>
   </div>
 </template>
 

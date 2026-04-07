@@ -73,6 +73,7 @@ export interface SongViewModel {
   bpmDisplay: string
   lengthLabel: string
   heroImageUrl: string | null
+  heroImageCacheKey: string | null
   imageFallback: string
   tags: string[]
   instruments: InstrumentDifficulty[]

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">GITADORA Song Browser</string>
-    <string name="title_activity_main">GITADORA Song Browser</string>
+    <string name="app_name">GD Data</string>
+    <string name="title_activity_main">GD Data</string>
     <string name="package_name">com.gddata.gitadora</string>
     <string name="custom_url_scheme">com.gddata.gitadora</string>
 </resources>

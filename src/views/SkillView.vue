@@ -1,9 +1,17 @@
-<script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+﻿<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import B50ScoreCard from '../components/B50ScoreCard.vue'
 import SkillProfileBoard from '../components/SkillProfileBoard.vue'
 import SkillScoreCard from '../components/SkillScoreCard.vue'
 import dmModeToggleSrc from '../assets/skill-toggle/dm-mode.svg'
 import gfModeToggleSrc from '../assets/skill-toggle/gf-mode.svg'
+import { exportElementAsPng, preloadImageSource, resolveImageSourceForExport } from '../lib/b50-export'
+import {
+  clearBjmaniaSkillSnapshotCache,
+  loadBjmaniaSkillSnapshotCache,
+  saveBjmaniaSkillSnapshotCache,
+} from '../lib/bjmania/cache'
 import {
   filterRecentByFamily,
   filterScoresByFamily,
@@ -26,9 +34,12 @@ import type {
   BjmaniaScoreListItem,
   BjmaniaScoreSortKey,
 } from '../types/bjmania'
+import type { SongViewModel } from '../types/song'
 
 const SCORE_PAGE_SIZE = 50
+const AUTH_RETRY_DELAYS_MS = [400, 900]
 type SkillMenu = 'hot' | 'filter' | 'sort' | null
+const router = useRouter()
 const FAMILY_LABELS: Record<BjmaniaScoreFamily, string> = { dm: 'DM', gf: 'GF' }
 const FAMILY_TOGGLE_ASSETS: Record<BjmaniaScoreFamily, string> = { dm: dmModeToggleSrc, gf: gfModeToggleSrc }
 const HOT_FILTER_OPTIONS: Array<{ value: BjmaniaScoreHotFilter; label: string }> = [
@@ -48,8 +59,8 @@ const SCORE_SORT_OPTIONS: Array<{ value: BjmaniaScoreSortKey; label: string }> =
   { value: 'skill-asc', label: 'Skill-升序' },
   { value: 'rate-desc', label: 'Rate-降序' },
   { value: 'rate-asc', label: 'Rate-升序' },
-  { value: 'difficulty-asc', label: 'Difficulty-升序' },
   { value: 'difficulty-desc', label: 'Difficulty-降序' },
+  { value: 'difficulty-asc', label: 'Difficulty-升序' },
 ]
 
 const booting = ref(true)
@@ -72,6 +83,11 @@ const showProfilePanel = ref(false)
 const openMenu = ref<SkillMenu>(null)
 const topShellRef = ref<HTMLElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
+const loadMoreTrigger = ref<HTMLElement | null>(null)
+const b50ExportShellRef = ref<HTMLElement | null>(null)
+const b50ExportRow = ref<BjmaniaScoreListItem | null>(null)
+const b50ExportCoverSrc = ref<string | null>(null)
+const generatingB50 = ref(false)
 
 const isNativeRuntime = computed(() => isNativeBjmaniaHttp())
 const isAuthenticated = computed(() => authUser.value !== null)
@@ -126,24 +142,106 @@ const skillSummary = computed(() => {
 })
 const activeSkillValue = computed(() => skillSummary.value?.[selectedFamily.value] ?? '--')
 
+let loadMoreObserver: IntersectionObserver | null = null
+
 function setErrorMessage(target: typeof loginError | typeof dataError, error: unknown, fallback: string) {
   if (error instanceof Error && error.message) target.value = error.message
   else target.value = fallback
 }
 
-async function hydrateSnapshot() {
-  loadingData.value = true
-  dataError.value = ''
+function applySnapshotData(nextSnapshot: BjmaniaGitadoraSnapshot, songs: SongViewModel[]) {
+  authUser.value = nextSnapshot.authUser
+  snapshot.value = nextSnapshot
+  scoreRows.value = mapBestScoresToList(nextSnapshot.bestScores.bestScores, songs, nextSnapshot.hotMusicIds)
+  recentRows.value = mapRecentPlaysToList(nextSnapshot.recentPlays.recentPlayEntries, songs)
+}
+
+function clearSnapshotData() {
+  authUser.value = null
+  snapshot.value = null
+  scoreRows.value = []
+  recentRows.value = []
+}
+
+function isUnauthorizedAuthError(error: unknown) {
+  return error instanceof Error && /status\s+(401|403)\b/.test(error.message)
+}
+
+function hasLocalSessionState() {
+  return (
+    authUser.value !== null ||
+    snapshot.value !== null ||
+    scoreRows.value.length > 0 ||
+    recentRows.value.length > 0
+  )
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function runWithUnauthorizedRetry<T>(loader: () => Promise<T>) {
+  let lastError: unknown
+
+  for (let attempt = 0; attempt <= AUTH_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await loader()
+    } catch (error) {
+      lastError = error
+
+      if (!isUnauthorizedAuthError(error) || attempt >= AUTH_RETRY_DELAYS_MS.length) {
+        throw error
+      }
+
+      await sleep(AUTH_RETRY_DELAYS_MS[attempt])
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('BJMANIA auth retry failed.')
+}
+
+async function restoreCachedSnapshot() {
+  const cached = loadBjmaniaSkillSnapshotCache()
+
+  if (!cached) {
+    return false
+  }
+
   try {
-    const [nextSnapshot, songs] = await Promise.all([loadBjmaniaGitadoraSnapshot(), loadSongCatalog()])
-    authUser.value = nextSnapshot.authUser
-    snapshot.value = nextSnapshot
-    scoreRows.value = mapBestScoresToList(nextSnapshot.bestScores.bestScores, songs, nextSnapshot.hotMusicIds)
-    recentRows.value = mapRecentPlaysToList(nextSnapshot.recentPlays.recentPlayEntries, songs)
+    const songs = await loadSongCatalog()
+    applySnapshotData(cached.snapshot, songs)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function hydrateSnapshot(options?: { preserveExisting?: boolean }) {
+  const preserveExisting = options?.preserveExisting === true
+  const hadExistingState = hasLocalSessionState()
+
+  loadingData.value = true
+  if (!preserveExisting) {
+    dataError.value = ''
+  }
+
+  try {
+    const [nextSnapshot, songs] = await Promise.all([
+      runWithUnauthorizedRetry(() => loadBjmaniaGitadoraSnapshot()),
+      loadSongCatalog(),
+    ])
+    applySnapshotData(nextSnapshot, songs)
+    dataError.value = ''
+    saveBjmaniaSkillSnapshotCache(nextSnapshot)
   } catch (error) {
-    snapshot.value = null
-    scoreRows.value = []
-    recentRows.value = []
+    if (isUnauthorizedAuthError(error)) {
+      dataError.value = ''
+      return
+    }
+
+    if (!preserveExisting && !hadExistingState) {
+      clearSnapshotData()
+    }
     setErrorMessage(dataError, error, 'Could not load BJMANIA data.')
   } finally {
     loadingData.value = false
@@ -154,15 +252,14 @@ async function bootstrapPage() {
   booting.value = true
   loginError.value = ''
   dataError.value = ''
-  try {
-    authUser.value = await getBjmaniaAuthMe()
-    await hydrateSnapshot()
-  } catch {
-    authUser.value = null
-    snapshot.value = null
-  } finally {
+  const restoredFromCache = await restoreCachedSnapshot()
+
+  if (restoredFromCache) {
     booting.value = false
   }
+
+  await hydrateSnapshot({ preserveExisting: restoredFromCache })
+  booting.value = false
 }
 
 async function handleLogin() {
@@ -176,7 +273,7 @@ async function handleLogin() {
       const result = await openBjmaniaNativeLogin()
       if (!result.success) {
         try {
-          authUser.value = await getBjmaniaAuthMe()
+          authUser.value = await runWithUnauthorizedRetry(() => getBjmaniaAuthMe())
           await hydrateSnapshot()
           return
         } catch {
@@ -184,7 +281,7 @@ async function handleLogin() {
           return
         }
       }
-      authUser.value = await getBjmaniaAuthMe()
+      authUser.value = await runWithUnauthorizedRetry(() => getBjmaniaAuthMe())
       await hydrateSnapshot()
     } catch (error) {
       setErrorMessage(loginError, error, 'Could not open native BJMANIA login.')
@@ -211,16 +308,49 @@ async function handleLogin() {
 
 async function handleSignOut() {
   await clearBjmaniaCookies()
-  authUser.value = null
-  snapshot.value = null
-  scoreRows.value = []
-  recentRows.value = []
+  clearBjmaniaSkillSnapshotCache()
+  clearSnapshotData()
   dataError.value = ''
   loginError.value = ''
   showProfilePanel.value = false
 }
 
-function loadMoreScores() { visibleScoreCount.value += SCORE_PAGE_SIZE }
+function loadMoreScores() {
+  if (!hasMoreScores.value) {
+    return
+  }
+
+  visibleScoreCount.value = Math.min(visibleScoreCount.value + SCORE_PAGE_SIZE, filteredScores.value.length)
+}
+
+function setupLoadMoreObserver() {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+
+  if (!loadMoreTrigger.value || !hasMoreScores.value) {
+    return
+  }
+
+  if (typeof IntersectionObserver === 'undefined') {
+    return
+  }
+
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        loadMoreScores()
+      }
+    },
+    {
+      root: null,
+      rootMargin: '220px 0px',
+      threshold: 0.01,
+    },
+  )
+
+  loadMoreObserver.observe(loadMoreTrigger.value)
+}
+
 function openFilters() { showProfilePanel.value = false; showFilters.value = true }
 function closeFilters() { showFilters.value = false; openMenu.value = null }
 function toggleFilters() { if (showFilters.value) closeFilters(); else openFilters() }
@@ -245,6 +375,86 @@ async function handleProfileBadgeClick() {
   showProfilePanel.value = !showProfilePanel.value
 }
 function cycleFamily() { selectedFamily.value = selectedFamily.value === 'dm' ? 'gf' : 'dm' }
+
+function pickTopB50Row() {
+  const skillRows = filterScoresByFamily(scoreRows.value, selectedFamily.value)
+    .filter((row) => row.inSkill && !row.isDeleted)
+    .sort((left, right) => right.skillCalcRaw - left.skillCalcRaw || left.musicId - right.musicId)
+
+  if (skillRows.length > 0) {
+    return skillRows[0]
+  }
+
+  return filterScoresByFamily(scoreRows.value, selectedFamily.value)
+    .filter((row) => !row.isDeleted)
+    .sort((left, right) => right.skillCalcRaw - left.skillCalcRaw || left.musicId - right.musicId)[0] ?? null
+}
+
+async function handleGenerateB50() {
+  showProfilePanel.value = false
+  await router.push({
+    name: 'skill-b50',
+    query: { family: selectedFamily.value },
+  })
+  return
+
+  if (generatingB50.value) {
+    return
+  }
+
+  const topRow = pickTopB50Row()
+
+  if (!topRow) {
+    if (typeof window !== 'undefined') {
+      window.alert('当前模式下没有可生成的 B50 卡片。')
+    }
+    return
+  }
+
+  generatingB50.value = true
+  const resolvedCoverSrc = await resolveImageSourceForExport(
+    topRow.song?.heroImageUrl ?? null,
+    topRow.song?.heroImageCacheKey ?? `${selectedFamily.value}_${topRow.musicId}_${topRow.instrument}`,
+  )
+
+  const coverReady = await preloadImageSource(resolvedCoverSrc)
+  b50ExportCoverSrc.value = coverReady ? resolvedCoverSrc : null
+  b50ExportRow.value = topRow
+
+  try {
+    await nextTick()
+
+    if (!b50ExportShellRef.value) {
+      throw new Error('B50 export card did not render.')
+    }
+
+    const result = await exportElementAsPng(
+      b50ExportShellRef.value!,
+      `b50_${selectedFamily.value}_${topRow.musicId}_${topRow.instrument}`,
+    )
+
+    if (typeof window !== 'undefined') {
+      const message = result.uri
+        ? `B50 卡片已保存到本地：${result.filename}`
+        : `B50 卡片已下载：${result.filename}`
+      window.alert(message)
+    }
+  } catch (error: unknown) {
+    let message = 'B50 export failed.'
+
+    if (error instanceof Error) {
+      message = (error as Error).message || message
+    }
+
+
+    if (typeof window !== 'undefined') {
+      window.alert(message)
+    }
+  } finally {
+    generatingB50.value = false
+  }
+}
+
 function handleDocumentPointerDown(event: PointerEvent) {
   const target = event.target
   if (!topShellRef.value || !(target instanceof Node)) return
@@ -258,11 +468,26 @@ watch([selectedFamily, selectedHotFilter, selectedScoreFilter, selectedScoreSort
   visibleScoreCount.value = SCORE_PAGE_SIZE
 })
 
-onMounted(() => {
+watch(
+  [visibleScores, hasMoreScores, loadMoreTrigger],
+  async () => {
+    await nextTick()
+    setupLoadMoreObserver()
+  },
+  { flush: 'post' },
+)
+
+onMounted(async () => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
-  void bootstrapPage()
+  await bootstrapPage()
+  await nextTick()
+  setupLoadMoreObserver()
 })
-onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocumentPointerDown))
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
+  loadMoreObserver?.disconnect()
+})
 </script>
 
 <template>
@@ -276,7 +501,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocument
               v-model="scoreSearch"
               class="search-shell__input"
               type="search"
-              placeholder="搜索曲名 / 艺术家 / ID"
+              placeholder="搜索曲目/艺术家"
               @click="openFilters"
               @focus="openFilters"
               @keydown.enter.prevent="submitSearch"
@@ -301,7 +526,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocument
           <div class="filter-drawer__controls">
             <div class="pill-menu">
               <button class="pill-menu__button" :class="{ 'pill-menu__button--filled': selectedHotFilter !== 'all' }" type="button" :title="selectedHotLabel" :aria-label="`Hot 过滤，当前 ${selectedHotLabel}`" :aria-expanded="openMenu === 'hot'" @click.stop="toggleMenu('hot')">
-                <span class="pill-menu__label">Hot</span>
+                <span class="pill-menu__label">分类</span>
                 <span class="pill-menu__icon" aria-hidden="true"><svg viewBox="0 0 18 18"><path d="M4 7L9 12L14 7"></path></svg></span>
               </button>
               <transition name="menu-fade">
@@ -347,6 +572,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocument
               :title="snapshot.gitadoraProfile.title || 'No title'"
               :mode-label="FAMILY_LABELS[selectedFamily]"
               :skill-value="activeSkillValue"
+              @generate-b50="handleGenerateB50"
               @sign-out="handleSignOut"
             />
             <div v-else class="profile-panel-card profile-panel-card--state">
@@ -354,7 +580,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocument
               <h2>档案读取失败</h2>
               <p>{{ dataError || '登录态已确认，但技能数据暂时不可用。' }}</p>
               <div class="profile-panel-card__actions">
-                <button class="profile-panel-card__button" type="button" @click="hydrateSnapshot">Retry</button>
+                <button class="profile-panel-card__button" type="button" @click="() => hydrateSnapshot()">Retry</button>
                 <button class="profile-panel-card__button profile-panel-card__button--muted" type="button" @click="handleSignOut">Sign out</button>
               </div>
             </div>
@@ -367,17 +593,17 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocument
       <section class="skill-list">
         <div v-if="booting" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>Checking BJMANIA session...</h2></div>
         <div v-else-if="!isAuthenticated" class="state-card state-card--centered">
-          <p>暂无账号信息，请先点击右上角头像登录</p>
+          <p>暂无账号信息，请先点击右上角头像徽标登录bjmania</p>
           <p v-if="submitting" class="state-card__message">正在打开 BJMANIA 登录...</p>
           <p v-if="loginError" class="state-card__message state-card__message--error">{{ loginError }}</p>
           <p v-if="dataError" class="state-card__message state-card__message--error">{{ dataError }}</p>
         </div>
-        <div v-else-if="loadingData" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>Loading live GITADORA data...</h2></div>
-        <div v-else-if="dataError" class="state-card state-card--error"><p class="state-card__eyebrow">BJMANIA</p><h2>数据拉取失败</h2><p>{{ dataError }}</p><button class="state-card__button" type="button" @click="hydrateSnapshot">Retry</button></div>
+        <div v-else-if="loadingData && !snapshot" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>Loading live GITADORA data...</h2></div>
+        <div v-else-if="dataError && !snapshot" class="state-card state-card--error"><p class="state-card__eyebrow">BJMANIA</p><h2>数据拉取失败</h2><p>{{ dataError }}</p><button class="state-card__button" type="button" @click="() => hydrateSnapshot()">Retry</button></div>
         <template v-else>
           <SkillScoreCard v-for="row in visibleScores" :key="`${row.musicId}-${row.instrument}-${row.level}`" :row="row" />
           <div v-if="!visibleScores.length" class="state-card"><p class="state-card__eyebrow">Filter</p><h2>没有匹配到成绩</h2><p>当前筛选条件下没有 {{ FAMILY_LABELS[selectedFamily] }} 成绩记录。</p></div>
-          <div v-if="hasMoreScores" class="load-more-card"><p>继续加载更多 skill 成绩</p><button class="load-more-card__button" type="button" @click="loadMoreScores">Load 50 more</button></div>
+          <div v-if="hasMoreScores" ref="loadMoreTrigger" class="skill-list__load-trigger" aria-hidden="true"></div>
         </template>
       </section>
     </div>
@@ -385,6 +611,16 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocument
     <button class="family-fab" type="button" :aria-label="`切换 skill 模式，当前 ${FAMILY_LABELS[selectedFamily]}`" @click="cycleFamily">
       <img class="family-fab__image" :src="selectedFamilyToggleSrc" alt="" aria-hidden="true" />
     </button>
+
+    <div class="b50-export-stage" aria-hidden="true">
+      <div
+        v-if="b50ExportRow"
+        ref="b50ExportShellRef"
+        class="b50-export-stage__shell"
+      >
+        <B50ScoreCard :row="b50ExportRow" :cover-src-override="b50ExportCoverSrc" />
+      </div>
+    </div>
   </section>
 </template>
 
@@ -819,13 +1055,9 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocument
   color: #b3261e;
 }
 
-.load-more-card {
-  justify-items: center;
-}
-
-.load-more-card p {
-  font-size: 0.78rem;
-  letter-spacing: 0.04em;
+.skill-list__load-trigger {
+  width: 100%;
+  height: 1px;
 }
 
 .family-fab {
@@ -850,6 +1082,22 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocument
   display: block;
   width: 56px;
   height: 56px;
+}
+
+.b50-export-stage {
+  position: fixed;
+  top: 0;
+  left: -9999px;
+  z-index: -1;
+  width: 208px;
+  height: 288px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.b50-export-stage__shell {
+  width: 208px;
+  height: 288px;
 }
 
 .panel-fade-enter-active,
@@ -895,3 +1143,5 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', handleDocument
 
 }
 </style>
+
+

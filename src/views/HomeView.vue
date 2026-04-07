@@ -19,7 +19,8 @@ type SearchSortOption =
   | 'difficulty-asc'
   | 'difficulty-desc'
 
-type SearchMenu = 'version' | 'sort' | null
+type SearchMenu = 'version' | 'filter' | 'sort' | null
+type SongCatalogFilterKey = 'current' | 'deleted' | 'classic' | 'non-classic'
 
 type SearchFilters = {
   versionKey: string
@@ -121,23 +122,30 @@ const searchInputRef = ref<HTMLInputElement | null>(null)
 const searchQuery = ref(
   typeof window === 'undefined' ? '' : window.localStorage.getItem(SEARCH_STORAGE_KEY) ?? '',
 )
-const sortOption = ref<SearchSortOption>('id-asc')
+const sortOption = ref<SearchSortOption>('id-desc')
 const selectedInstrument = ref<InstrumentKey>('drum')
+const selectedCatalogFilter = ref<SongCatalogFilterKey>('current')
 const filters = reactive<SearchFilters>({
   versionKey: '',
   difficultyMin: FULL_DIFFICULTY_MIN,
   difficultyMax: FULL_DIFFICULTY_MAX,
 })
 
+const SONG_FILTER_OPTIONS: Array<{ value: SongCatalogFilterKey; label: string }> = [
+  { value: 'current', label: '现有曲目' },
+  { value: 'deleted', label: '删除曲目' },
+  { value: 'classic', label: '展示Classic曲目' },
+  { value: 'non-classic', label: '隐藏Classic曲目' },
+]
 const sortOptions: Array<{ label: string; value: SearchSortOption }> = [
-  { label: 'ID-升序', value: 'id-asc' },
-  { label: 'ID-降序', value: 'id-desc' },
-  { label: '标题-升序', value: 'title-asc' },
+  { label: '默认-降序', value: 'id-desc' },
+  { label: '默认-升序', value: 'id-asc' },
   { label: '标题-降序', value: 'title-desc' },
-  { label: '艺术家-升序', value: 'artist-asc' },
+  { label: '标题-升序', value: 'title-asc' },
   { label: '艺术家-降序', value: 'artist-desc' },
-  { label: 'MAS难度-升序', value: 'difficulty-asc' },
+  { label: '艺术家-升序', value: 'artist-asc' },
   { label: 'MAS难度-降序', value: 'difficulty-desc' },
+  { label: 'MAS难度-升序', value: 'difficulty-asc' },
 ]
 
 let loadMoreObserver: IntersectionObserver | null = null
@@ -166,6 +174,10 @@ function resolveInstrumentVersionLabel(versionKey: string, instrument: Instrumen
 function resolveInstrumentVersionOrder(versionKey: string, instrument: InstrumentKey) {
   const { gfIndex, dmIndex } = parseVersionKey(versionKey)
   return instrument === 'drum' ? dmIndex : gfIndex
+}
+
+function isHiddenInstrumentVersion(versionKey: string, instrument: InstrumentKey) {
+  return resolveInstrumentVersionLabel(versionKey, instrument) === 'GALAXY WAVE DELTA'
 }
 
 function compareText(left: string, right: string) {
@@ -216,6 +228,10 @@ const versionOptions = computed(() => {
   const uniqueVersions = new Map<string, { value: string; label: string; order: number }>()
 
   songs.value.forEach((song) => {
+    if (isHiddenInstrumentVersion(song.versionKey, selectedInstrument.value)) {
+      return
+    }
+
     if (uniqueVersions.has(song.versionKey)) {
       return
     }
@@ -233,25 +249,43 @@ const versionOptions = computed(() => {
 })
 
 const hasActiveFilters = computed(() => {
-  return filters.versionKey !== '' || !isFullDifficultyRange()
+  return filters.versionKey !== '' || selectedCatalogFilter.value !== 'current' || !isFullDifficultyRange()
 })
 
 const selectedVersionLabel = computed(() => {
   if (!filters.versionKey) {
-    return '版本'
+    return '所有版本'
   }
 
-  return versionOptions.value.find((option) => option.value === filters.versionKey)?.label ?? '版本'
+  return versionOptions.value.find((option) => option.value === filters.versionKey)?.label ?? '所有版本'
+})
+
+const selectedCatalogFilterLabel = computed(() => {
+  return SONG_FILTER_OPTIONS.find((option) => option.value === selectedCatalogFilter.value)?.label ?? '现有曲目'
 })
 
 const selectedSortLabel = computed(() => {
-  return sortOptions.find((option) => option.value === sortOption.value)?.label ?? '排序'
+  return sortOptions.find((option) => option.value === sortOption.value)?.label ?? '默认-降序'
 })
+
+watch(
+  versionOptions,
+  (options) => {
+    if (filters.versionKey && !options.some((option) => option.value === filters.versionKey)) {
+      filters.versionKey = ''
+    }
+  },
+  { immediate: true },
+)
 
 const filteredSongs = computed(() => {
   const normalizedQuery = searchQuery.value.trim().toLowerCase()
 
   const nextSongs = songs.value.filter((song) => {
+    if (isHiddenInstrumentVersion(song.versionKey, selectedInstrument.value)) {
+      return false
+    }
+
     const matchesSearch =
       normalizedQuery.length === 0 ||
       song.searchText.includes(normalizedQuery) ||
@@ -265,6 +299,30 @@ const filteredSongs = computed(() => {
       return false
     }
 
+    switch (selectedCatalogFilter.value) {
+      case 'deleted':
+        if (!song.metadata.isDeleted) {
+          return false
+        }
+        break
+      case 'classic':
+        if (!song.metadata.isClassic) {
+          return false
+        }
+        break
+      case 'non-classic':
+        if (song.metadata.isClassic || song.metadata.isDeleted) {
+          return false
+        }
+        break
+      case 'current':
+      default:
+        if (song.metadata.isDeleted) {
+          return false
+        }
+        break
+    }
+
     if (!matchesSelectedDifficultyRange(song)) {
       return false
     }
@@ -275,9 +333,18 @@ const filteredSongs = computed(() => {
   return nextSongs.slice().sort((left, right) => {
     switch (sortOption.value) {
       case 'id-asc':
-        return left.musicId - right.musicId
+        return (
+          resolveInstrumentVersionOrder(left.versionKey, selectedInstrument.value) -
+            resolveInstrumentVersionOrder(right.versionKey, selectedInstrument.value) ||
+          left.musicId - right.musicId
+        )
       case 'id-desc':
-        return right.musicId - left.musicId
+        return (
+          Number(left.metadata.isClassic) - Number(right.metadata.isClassic) ||
+          resolveInstrumentVersionOrder(right.versionKey, selectedInstrument.value) -
+            resolveInstrumentVersionOrder(left.versionKey, selectedInstrument.value) ||
+          right.musicId - left.musicId
+        )
       case 'title-asc':
         return (
           left.sortKeys.titleAsciiOrder - right.sortKeys.titleAsciiOrder ||
@@ -327,6 +394,7 @@ watch(
   [
     searchQuery,
     sortOption,
+    selectedCatalogFilter,
     selectedInstrument,
     () => filters.versionKey,
     () => filters.difficultyMin,
@@ -375,13 +443,14 @@ function setupLoadMoreObserver() {
 
 function resetFilters() {
   filters.versionKey = ''
+  selectedCatalogFilter.value = 'current'
   filters.difficultyMin = FULL_DIFFICULTY_MIN
   filters.difficultyMax = FULL_DIFFICULTY_MAX
 }
 
 function clearAllConditions() {
   searchQuery.value = ''
-  sortOption.value = 'id-asc'
+  sortOption.value = 'id-desc'
   resetFilters()
   showFilters.value = false
   openMenu.value = null
@@ -419,6 +488,11 @@ function toggleMenu(menu: Exclude<SearchMenu, null>) {
 
 function selectVersion(value: string) {
   filters.versionKey = value
+  openMenu.value = null
+}
+
+function selectCatalogFilter(value: SongCatalogFilterKey) {
+  selectedCatalogFilter.value = value
   openMenu.value = null
 }
 
@@ -508,7 +582,7 @@ function compareMasterDifficulty(
               v-model="searchQuery"
               class="search-shell__input"
               type="search"
-              placeholder="搜索曲名 / 艺术家 / ID"
+              placeholder="搜索曲目/艺术家"
               @click="openFilters"
               @focus="openFilters"
               @keydown.enter.prevent="submitSearch"
@@ -531,15 +605,17 @@ function compareMasterDifficulty(
       <transition name="panel-fade">
         <section v-if="showFilters" class="filter-drawer">
           <div class="filter-drawer__controls">
-            <div class="pill-menu">
+            <div class="pill-menu pill-menu--version">
               <button
                 class="pill-menu__button"
+                :class="{ 'pill-menu__button--filled': filters.versionKey !== '' }"
                 type="button"
-                aria-label="版本筛选"
+                :title="selectedVersionLabel"
+                :aria-label="`版本筛选，当前 ${selectedVersionLabel}`"
                 :aria-expanded="openMenu === 'version'"
                 @click.stop="toggleMenu('version')"
               >
-                <span class="pill-menu__label">{{ selectedVersionLabel }}</span>
+                <span class="pill-menu__label">版本</span>
                 <span class="pill-menu__icon" aria-hidden="true">
                   <svg viewBox="0 0 18 18">
                     <path d="M4 7L9 12L14 7"></path>
@@ -555,7 +631,7 @@ function compareMasterDifficulty(
                     type="button"
                     @click="selectVersion('')"
                   >
-                    All versions
+                    所有版本
                   </button>
                   <button
                     v-for="option in versionOptions"
@@ -571,15 +647,51 @@ function compareMasterDifficulty(
               </transition>
             </div>
 
-            <div class="pill-menu">
+            <div class="pill-menu pill-menu--filter">
               <button
                 class="pill-menu__button"
+                :class="{ 'pill-menu__button--filled': selectedCatalogFilter !== 'current' }"
                 type="button"
-                aria-label="排序方式"
+                :title="selectedCatalogFilterLabel"
+                :aria-label="`曲目筛选，当前 ${selectedCatalogFilterLabel}`"
+                :aria-expanded="openMenu === 'filter'"
+                @click.stop="toggleMenu('filter')"
+              >
+                <span class="pill-menu__label">筛选</span>
+                <span class="pill-menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 18 18">
+                    <path d="M4 7L9 12L14 7"></path>
+                  </svg>
+                </span>
+              </button>
+
+              <transition name="menu-fade">
+                <div v-if="openMenu === 'filter'" class="pill-menu__sheet">
+                  <button
+                    v-for="option in SONG_FILTER_OPTIONS"
+                    :key="option.value"
+                    class="pill-menu__option"
+                    :class="{ 'pill-menu__option--active': selectedCatalogFilter === option.value }"
+                    type="button"
+                    @click="selectCatalogFilter(option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+              </transition>
+            </div>
+
+            <div class="pill-menu pill-menu--sort">
+              <button
+                class="pill-menu__button"
+                :class="{ 'pill-menu__button--filled': sortOption !== 'id-desc' }"
+                type="button"
+                :title="selectedSortLabel"
+                :aria-label="`排序方式，当前 ${selectedSortLabel}`"
                 :aria-expanded="openMenu === 'sort'"
                 @click.stop="toggleMenu('sort')"
               >
-                <span class="pill-menu__label">{{ selectedSortLabel }}</span>
+                <span class="pill-menu__label">排序</span>
                 <span class="pill-menu__icon" aria-hidden="true">
                   <svg viewBox="0 0 18 18">
                     <path d="M4 7L9 12L14 7"></path>
@@ -766,36 +878,51 @@ function compareMasterDifficulty(
 .filter-drawer {
   width: min(100%, 402px);
   margin: 0 auto;
-  padding: 16px 11px 18px;
   background: #ffffff;
+  padding: 14px 11px 22px;
 }
 
 .filter-drawer__controls {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(100%, 360px);
+  min-height: 38px;
+  margin: 0 auto;
+  gap: 0;
+  flex-wrap: nowrap;
 }
 
 .pill-menu {
   position: relative;
   z-index: 2;
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  max-width: 108px;
 }
 
 .pill-menu__button {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  gap: 14px;
   width: 100%;
+  height: 38px;
   min-height: 38px;
-  padding: 0 12px 0 18px;
+  padding: 0 18px;
   border: 1px solid #4f378a;
   border-radius: 25px;
   background: #ffffff;
   color: #4f378a;
   box-shadow: none;
   font-family: 'Roboto', var(--font-sans);
-  font-size: 0.95rem;
+  font-size: 14px;
   cursor: pointer;
+}
+
+.pill-menu__button--filled {
+  background: rgba(232, 222, 248, 0.38);
 }
 
 .pill-menu__button:focus-visible {
@@ -806,13 +933,10 @@ function compareMasterDifficulty(
 }
 
 .pill-menu__label {
-  min-width: 0;
-  overflow: hidden;
   font-weight: 500;
   line-height: 20px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   text-align: center;
+  white-space: nowrap;
 }
 
 .pill-menu__icon {
@@ -835,6 +959,7 @@ function compareMasterDifficulty(
   top: calc(100% + 10px);
   left: 0;
   right: 0;
+  min-width: 108px;
   max-height: 280px;
   padding: 8px;
   overflow-y: auto;
@@ -844,6 +969,27 @@ function compareMasterDifficulty(
   box-shadow:
     0 18px 40px rgba(43, 29, 85, 0.18),
     0 6px 18px rgba(43, 29, 85, 0.1);
+}
+
+.pill-menu--version .pill-menu__sheet {
+  width: 176px;
+  min-width: 176px;
+  left: 0;
+  right: auto;
+}
+
+.pill-menu--filter .pill-menu__sheet {
+  width: 172px;
+  min-width: 172px;
+  left: 0;
+  right: auto;
+}
+
+.pill-menu--sort .pill-menu__sheet {
+  width: 172px;
+  min-width: 172px;
+  left: auto;
+  right: 0;
 }
 
 .pill-menu__option {
@@ -859,6 +1005,7 @@ function compareMasterDifficulty(
   font-family: 'Roboto', var(--font-sans);
   font-size: 0.92rem;
   text-align: left;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -967,7 +1114,20 @@ function compareMasterDifficulty(
   }
 
   .filter-drawer__controls {
-    gap: 16px;
+    gap: 0;
+  }
+}
+
+@media (max-width: 440px) {
+  .home-view__inner {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .top-shell__bar,
+  .filter-drawer {
+    padding-left: 10px;
+    padding-right: 10px;
   }
 }
 </style>

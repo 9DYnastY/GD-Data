@@ -6,6 +6,7 @@ import type {
   RawSong,
   SongViewModel,
 } from '../types/song'
+import { createCoverCacheKey } from './cover-cache'
 
 const INSTRUMENT_ORDER: Array<{ key: InstrumentKey; label: string }> = [
   { key: 'guitar', label: 'Guitar' },
@@ -257,6 +258,7 @@ export function normalizeSong(rawSong: RawSong, index: number): SongViewModel {
     bpmDisplay: bpm.label,
     lengthLabel: normalizeText(rawSong.remy_length, 'Length TBD'),
     heroImageUrl: rawSong.remy_imageUrl ?? null,
+    heroImageCacheKey: createCoverCacheKey(rawSong.music_id, rawSong.remy_imageUrl ?? null),
     imageFallback: createImageFallback(displayTitle),
     tags,
     instruments,

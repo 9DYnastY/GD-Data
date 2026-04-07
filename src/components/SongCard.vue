@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
 import DifficultyGrid from './DifficultyGrid.vue'
 import LazyCoverImage from './LazyCoverImage.vue'
 import type { InstrumentKey, SongViewModel } from '../types/song'
@@ -170,7 +169,7 @@ const versionLogoSrc = computed(() => resolveVersionLogo(props.song.versionKey, 
 
 <template>
   <div ref="cardRoot" class="song-card-shell">
-    <RouterLink class="song-card" :to="`/song/${song.musicId}`">
+    <div class="song-card">
       <div
         class="song-card__stage"
         :style="{
@@ -201,6 +200,7 @@ const versionLogoSrc = computed(() => resolveVersionLogo(props.song.versionKey, 
               <LazyCoverImage
                 class="song-card__cover"
                 :alt="`${song.displayTitle} cover`"
+                :cache-key="song.heroImageCacheKey"
                 :fallback-text="song.imageFallback"
                 :src="song.heroImageUrl"
               />
@@ -231,7 +231,7 @@ const versionLogoSrc = computed(() => resolveVersionLogo(props.song.versionKey, 
           </div>
         </div>
       </div>
-    </RouterLink>
+    </div>
   </div>
 </template>
 
