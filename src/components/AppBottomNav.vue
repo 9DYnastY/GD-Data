@@ -5,7 +5,7 @@ import { RouterLink, useRoute } from 'vue-router'
 const route = useRoute()
 
 const items = [
-  { name: 'home', label: '歌曲列表', to: '/' },
+  { name: 'home', label: '曲库', to: '/' },
   { name: 'skill', label: 'SKILL', to: '/skill' },
 ]
 

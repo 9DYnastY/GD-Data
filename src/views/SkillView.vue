@@ -277,7 +277,7 @@ async function handleLogin() {
           await hydrateSnapshot()
           return
         } catch {
-          loginError.value = result.cancelled ? 'Login was cancelled before the session could be confirmed.' : 'BJMANIA login did not complete.'
+          loginError.value = result.cancelled ? '登录中断，请重试' : '登录未完成'
           return
         }
       }
@@ -591,14 +591,14 @@ onBeforeUnmount(() => {
 
     <div class="skill-view__inner">
       <section class="skill-list">
-        <div v-if="booting" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>Checking BJMANIA session...</h2></div>
+        <div v-if="booting" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>检查账号信息中...</h2></div>
         <div v-else-if="!isAuthenticated" class="state-card state-card--centered">
-          <p>暂无账号信息，请先点击右上角头像徽标登录bjmania</p>
+          <p>暂无账号信息，请点击右上角头像登录，建议勾上“记住我”</p>
           <p v-if="submitting" class="state-card__message">正在打开 BJMANIA 登录...</p>
           <p v-if="loginError" class="state-card__message state-card__message--error">{{ loginError }}</p>
           <p v-if="dataError" class="state-card__message state-card__message--error">{{ dataError }}</p>
         </div>
-        <div v-else-if="loadingData && !snapshot" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>Loading live GITADORA data...</h2></div>
+        <div v-else-if="loadingData && !snapshot" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>获取skill数据中...</h2></div>
         <div v-else-if="dataError && !snapshot" class="state-card state-card--error"><p class="state-card__eyebrow">BJMANIA</p><h2>数据拉取失败</h2><p>{{ dataError }}</p><button class="state-card__button" type="button" @click="() => hydrateSnapshot()">Retry</button></div>
         <template v-else>
           <SkillScoreCard v-for="row in visibleScores" :key="`${row.musicId}-${row.instrument}-${row.level}`" :row="row" />
@@ -626,6 +626,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .skill-view {
+  --skill-safe-top: env(safe-area-inset-top, 0px);
+  --skill-top-bar-padding: calc(var(--skill-safe-top) + 15px);
+  --skill-content-top-padding: calc(var(--skill-safe-top) + 100px);
   position: relative;
   min-height: 100vh;
 }
@@ -635,7 +638,7 @@ onBeforeUnmount(() => {
   z-index: 2;
   width: min(100%, 403px);
   margin: 0 auto;
-  padding: 148px 14px 44px;
+  padding: var(--skill-content-top-padding) 14px 44px;
 }
 
 .top-shell {
@@ -654,7 +657,7 @@ onBeforeUnmount(() => {
 .top-shell__bar {
   width: min(100%, 402px);
   margin: 0 auto;
-  padding: 63px 11px 15px;
+  padding: var(--skill-top-bar-padding) 11px 15px;
 }
 
 .top-shell__bar--skill {
@@ -1143,5 +1146,4 @@ onBeforeUnmount(() => {
 
 }
 </style>
-
 

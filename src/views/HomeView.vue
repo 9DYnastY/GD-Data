@@ -781,6 +781,9 @@ function compareMasterDifficulty(
 
 <style scoped>
 .home-view {
+  --home-safe-top: env(safe-area-inset-top, 0px);
+  --home-top-bar-padding: calc(var(--home-safe-top) + 15px);
+  --home-content-top-padding: calc(var(--home-safe-top) + 108px);
   position: relative;
   min-height: 100vh;
 }
@@ -790,7 +793,7 @@ function compareMasterDifficulty(
   z-index: 2;
   width: min(100%, 403px);
   margin: 0 auto;
-  padding: 156px 14px 36px;
+  padding: var(--home-content-top-padding) 14px 36px;
 }
 
 .top-shell,
@@ -814,7 +817,7 @@ function compareMasterDifficulty(
 .top-shell__bar {
   width: min(100%, 402px);
   margin: 0 auto;
-  padding: 63px 11px 15px;
+  padding: var(--home-top-bar-padding) 11px 15px;
 }
 
 .search-shell {

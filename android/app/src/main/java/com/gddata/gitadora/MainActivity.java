@@ -9,5 +9,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BjmaniaAuthPlugin.class);
         registerPlugin(BjmaniaApiPlugin.class);
         super.onCreate(savedInstanceState);
+
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().getSettings().setTextZoom(100);
+        }
     }
 }

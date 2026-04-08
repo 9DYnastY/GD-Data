@@ -3,14 +3,11 @@ package com.gddata.gitadora;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Bitmap;
-import android.graphics.Color;
 import android.net.http.SslError;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
-import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.SslErrorHandler;
@@ -21,7 +18,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
-import android.widget.TextView;
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -45,7 +41,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
     private final Runnable scheduledVerifyRunnable = this::verifyLoginStateSoonInternal;
     private final Runnable autoVerifyRunnable = this::autoVerifyLoop;
     private @Nullable WebView webView;
-    private @Nullable TextView statusView;
     private @Nullable String currentUrl;
     private @Nullable BjmaniaSessionManager sessionManager;
     private volatile boolean finishingResult = false;
@@ -73,25 +68,7 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         );
-
-        TextView nextStatusView = new TextView(this);
-        statusView = nextStatusView;
-        nextStatusView.setTextColor(Color.WHITE);
-        nextStatusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        nextStatusView.setGravity(Gravity.CENTER);
-        nextStatusView.setBackgroundColor(Color.argb(176, 18, 13, 35));
-        int horizontalPadding = dp(14);
-        int verticalPadding = dp(10);
-        nextStatusView.setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding);
-        FrameLayout.LayoutParams statusParams =
-            new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-        statusParams.gravity = Gravity.TOP;
-        rootLayout.addView(nextStatusView, statusParams);
         setContentView(rootLayout);
-        updateStatus("Complete the BJMANIA login. The app will return automatically after verification.");
 
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
@@ -104,6 +81,7 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setSupportZoom(false);
+        settings.setTextZoom(100);
         settings.setSupportMultipleWindows(false);
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
 
@@ -449,28 +427,11 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
     }
 
     private void updateStatusForCurrentPage(@Nullable String url) {
-        if (url == null || url.contains("/login")) {
-            updateStatus("Complete the BJMANIA login. The app will return automatically after verification.");
-            return;
-        }
-
-        updateStatus("Checking BJMANIA login...");
+        // Login status overlay removed.
     }
 
     private void updateStatus(String message) {
-        if (statusView != null) {
-            statusView.setText(message);
-        }
-    }
-
-    private int dp(int value) {
-        return Math.round(
-            TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP,
-                value,
-                getResources().getDisplayMetrics()
-            )
-        );
+        // Login status overlay removed; keep call sites as no-ops.
     }
 
     @Override
