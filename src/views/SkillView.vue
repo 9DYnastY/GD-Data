@@ -57,10 +57,10 @@ const SCORE_FILTER_OPTIONS: Array<{ value: BjmaniaScoreFilterKey; label: string 
 const SCORE_SORT_OPTIONS: Array<{ value: BjmaniaScoreSortKey; label: string }> = [
   { value: 'skill-desc', label: 'Skill-降序' },
   { value: 'skill-asc', label: 'Skill-升序' },
-  { value: 'rate-desc', label: 'Rate-降序' },
-  { value: 'rate-asc', label: 'Rate-升序' },
-  { value: 'difficulty-desc', label: 'Difficulty-降序' },
-  { value: 'difficulty-asc', label: 'Difficulty-升序' },
+  { value: 'rate-desc', label: '达成率-降序' },
+  { value: 'rate-asc', label: '达成率-升序' },
+  { value: 'difficulty-desc', label: 'Level-降序' },
+  { value: 'difficulty-asc', label: 'Level-升序' },
 ]
 
 const booting = ref(true)
@@ -455,6 +455,14 @@ async function handleGenerateB50() {
   }
 }
 
+async function handleOpenPlayHistory() {
+  showProfilePanel.value = false
+  await router.push({
+    name: 'skill-history',
+    query: { family: selectedFamily.value },
+  })
+}
+
 function handleDocumentPointerDown(event: PointerEvent) {
   const target = event.target
   if (!topShellRef.value || !(target instanceof Node)) return
@@ -573,6 +581,7 @@ onBeforeUnmount(() => {
               :mode-label="FAMILY_LABELS[selectedFamily]"
               :skill-value="activeSkillValue"
               @generate-b50="handleGenerateB50"
+              @play-history="handleOpenPlayHistory"
               @sign-out="handleSignOut"
             />
             <div v-else class="profile-panel-card profile-panel-card--state">
@@ -1146,4 +1155,3 @@ onBeforeUnmount(() => {
 
 }
 </style>
-

@@ -23,7 +23,7 @@ type SearchMenu = 'version' | 'filter' | 'sort' | null
 type SongCatalogFilterKey = 'current' | 'deleted' | 'classic' | 'non-classic'
 
 type SearchFilters = {
-  versionKey: string
+  versionOrder: number | null
   difficultyMin: number
   difficultyMax: number
 }
@@ -126,7 +126,7 @@ const sortOption = ref<SearchSortOption>('id-desc')
 const selectedInstrument = ref<InstrumentKey>('drum')
 const selectedCatalogFilter = ref<SongCatalogFilterKey>('current')
 const filters = reactive<SearchFilters>({
-  versionKey: '',
+  versionOrder: null,
   difficultyMin: FULL_DIFFICULTY_MIN,
   difficultyMax: FULL_DIFFICULTY_MAX,
 })
@@ -225,21 +225,23 @@ const selectedInstrumentLabel = computed(() => INSTRUMENT_LABELS[selectedInstrum
 const selectedInstrumentToggleSrc = computed(() => INSTRUMENT_TOGGLE_ASSETS[selectedInstrument.value])
 
 const versionOptions = computed(() => {
-  const uniqueVersions = new Map<string, { value: string; label: string; order: number }>()
+  const uniqueVersions = new Map<number, { value: number; label: string; order: number }>()
 
   songs.value.forEach((song) => {
     if (isHiddenInstrumentVersion(song.versionKey, selectedInstrument.value)) {
       return
     }
 
-    if (uniqueVersions.has(song.versionKey)) {
+    const order = resolveInstrumentVersionOrder(song.versionKey, selectedInstrument.value)
+
+    if (uniqueVersions.has(order)) {
       return
     }
 
-    uniqueVersions.set(song.versionKey, {
-      value: song.versionKey,
+    uniqueVersions.set(order, {
+      value: order,
       label: resolveInstrumentVersionLabel(song.versionKey, selectedInstrument.value),
-      order: resolveInstrumentVersionOrder(song.versionKey, selectedInstrument.value),
+      order,
     })
   })
 
@@ -249,15 +251,15 @@ const versionOptions = computed(() => {
 })
 
 const hasActiveFilters = computed(() => {
-  return filters.versionKey !== '' || selectedCatalogFilter.value !== 'current' || !isFullDifficultyRange()
+  return filters.versionOrder !== null || selectedCatalogFilter.value !== 'current' || !isFullDifficultyRange()
 })
 
 const selectedVersionLabel = computed(() => {
-  if (!filters.versionKey) {
+  if (filters.versionOrder === null) {
     return '所有版本'
   }
 
-  return versionOptions.value.find((option) => option.value === filters.versionKey)?.label ?? '所有版本'
+  return versionOptions.value.find((option) => option.value === filters.versionOrder)?.label ?? '所有版本'
 })
 
 const selectedCatalogFilterLabel = computed(() => {
@@ -271,8 +273,8 @@ const selectedSortLabel = computed(() => {
 watch(
   versionOptions,
   (options) => {
-    if (filters.versionKey && !options.some((option) => option.value === filters.versionKey)) {
-      filters.versionKey = ''
+    if (filters.versionOrder !== null && !options.some((option) => option.value === filters.versionOrder)) {
+      filters.versionOrder = null
     }
   },
   { immediate: true },
@@ -295,7 +297,10 @@ const filteredSongs = computed(() => {
       return false
     }
 
-    if (filters.versionKey && song.versionKey !== filters.versionKey) {
+    if (
+      filters.versionOrder !== null &&
+      resolveInstrumentVersionOrder(song.versionKey, selectedInstrument.value) !== filters.versionOrder
+    ) {
       return false
     }
 
@@ -340,9 +345,9 @@ const filteredSongs = computed(() => {
         )
       case 'id-desc':
         return (
-          Number(left.metadata.isClassic) - Number(right.metadata.isClassic) ||
           resolveInstrumentVersionOrder(right.versionKey, selectedInstrument.value) -
             resolveInstrumentVersionOrder(left.versionKey, selectedInstrument.value) ||
+          Number(left.metadata.isClassic) - Number(right.metadata.isClassic) ||
           right.musicId - left.musicId
         )
       case 'title-asc':
@@ -396,7 +401,7 @@ watch(
     sortOption,
     selectedCatalogFilter,
     selectedInstrument,
-    () => filters.versionKey,
+    () => filters.versionOrder,
     () => filters.difficultyMin,
     () => filters.difficultyMax,
   ],
@@ -442,7 +447,7 @@ function setupLoadMoreObserver() {
 }
 
 function resetFilters() {
-  filters.versionKey = ''
+  filters.versionOrder = null
   selectedCatalogFilter.value = 'current'
   filters.difficultyMin = FULL_DIFFICULTY_MIN
   filters.difficultyMax = FULL_DIFFICULTY_MAX
@@ -486,8 +491,8 @@ function toggleMenu(menu: Exclude<SearchMenu, null>) {
   openMenu.value = openMenu.value === menu ? null : menu
 }
 
-function selectVersion(value: string) {
-  filters.versionKey = value
+function selectVersion(value: number | null) {
+  filters.versionOrder = value
   openMenu.value = null
 }
 
@@ -608,7 +613,7 @@ function compareMasterDifficulty(
             <div class="pill-menu pill-menu--version">
               <button
                 class="pill-menu__button"
-                :class="{ 'pill-menu__button--filled': filters.versionKey !== '' }"
+                :class="{ 'pill-menu__button--filled': filters.versionOrder !== null }"
                 type="button"
                 :title="selectedVersionLabel"
                 :aria-label="`版本筛选，当前 ${selectedVersionLabel}`"
@@ -627,9 +632,9 @@ function compareMasterDifficulty(
                 <div v-if="openMenu === 'version'" class="pill-menu__sheet">
                   <button
                     class="pill-menu__option"
-                    :class="{ 'pill-menu__option--active': filters.versionKey === '' }"
+                    :class="{ 'pill-menu__option--active': filters.versionOrder === null }"
                     type="button"
-                    @click="selectVersion('')"
+                    @click="selectVersion(null)"
                   >
                     所有版本
                   </button>
@@ -637,7 +642,7 @@ function compareMasterDifficulty(
                     v-for="option in versionOptions"
                     :key="option.value"
                     class="pill-menu__option"
-                    :class="{ 'pill-menu__option--active': filters.versionKey === option.value }"
+                    :class="{ 'pill-menu__option--active': filters.versionOrder === option.value }"
                     type="button"
                     @click="selectVersion(option.value)"
                   >
@@ -732,7 +737,7 @@ function compareMasterDifficulty(
 
     <div class="home-view__inner">
       <section v-if="loading" class="state-card">
-        Loading catalog data...
+        加载中...
       </section>
 
       <section v-else-if="errorMessage" class="state-card state-card--error">

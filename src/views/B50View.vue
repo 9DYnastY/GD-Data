@@ -12,6 +12,7 @@ import type { BjmaniaGitadoraSnapshot, BjmaniaScoreFamily, BjmaniaScoreListItem 
 import type { SongViewModel } from '../types/song'
 
 const MIN_PREVIEW_SCALE = 0.42
+const COVER_PREPARE_CONCURRENCY = 6
 const EXPORT_OPTIONS = {
   format: 'jpeg' as const,
   quality: 0.8,
@@ -100,6 +101,105 @@ function updatePreviewScale() {
   previewScale.value = Number.isFinite(nextScale) && nextScale > 0 ? nextScale : MIN_PREVIEW_SCALE
 }
 
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>,
+) {
+  if (!items.length) {
+    return [] as R[]
+  }
+
+  const workerCount = Math.min(Math.max(limit, 1), items.length)
+  const results = new Array<R>(items.length)
+  let nextIndex = 0
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex
+        nextIndex += 1
+        results[currentIndex] = await mapper(items[currentIndex], currentIndex)
+      }
+    }),
+  )
+
+  return results
+}
+
+function isRemoteImageSource(source: string) {
+  return /^https?:\/\//i.test(source)
+}
+
+async function resolveReadyCoverSource(
+  row: BjmaniaScoreListItem,
+  options?: { allowExportFallback?: boolean },
+) {
+  const key = getB50RowKey(row)
+  const source = row.song?.heroImageUrl ?? null
+
+  if (!source) {
+    return null
+  }
+
+  const cacheKey = row.song?.heroImageCacheKey ?? key
+  const currentPreviewSource = previewCoverMap.value[key]
+
+  if (currentPreviewSource && await preloadImageSource(currentPreviewSource)) {
+    return currentPreviewSource
+  }
+
+  const cachedSource = await resolveCoverImageSource(source, cacheKey)
+
+  if (
+    cachedSource &&
+    (!options?.allowExportFallback || !isRemoteImageSource(cachedSource)) &&
+    await preloadImageSource(cachedSource)
+  ) {
+    return cachedSource
+  }
+
+  if (options?.allowExportFallback) {
+    const exportSafeSource = await resolveImageSourceForExport(source, cacheKey)
+
+    if (exportSafeSource && await preloadImageSource(exportSafeSource)) {
+      return exportSafeSource
+    }
+  }
+
+  if (cachedSource && await preloadImageSource(cachedSource)) {
+    return cachedSource
+  }
+
+  return null
+}
+
+async function buildCoverMap(
+  rows: readonly BjmaniaScoreListItem[],
+  options?: { allowExportFallback?: boolean },
+) {
+  const entries = await mapWithConcurrency(rows, COVER_PREPARE_CONCURRENCY, async (row) => {
+    const key = getB50RowKey(row)
+    const coverSource = await resolveReadyCoverSource(row, options)
+    return [key, coverSource] as const
+  })
+
+  return Object.fromEntries(entries) as Record<string, string | null>
+}
+
+function countMissingCoverSources(
+  rows: readonly BjmaniaScoreListItem[],
+  coverMap: Record<string, string | null>,
+) {
+  return rows.reduce((count, row) => {
+    if (!row.song?.heroImageUrl) {
+      return count
+    }
+
+    return coverMap[getB50RowKey(row)] ? count : count + 1
+  }, 0)
+}
+
 function applySnapshot(nextSnapshot: BjmaniaGitadoraSnapshot, songs: SongViewModel[]) {
   snapshot.value = nextSnapshot
   scoreRows.value = mapBestScoresToList(nextSnapshot.bestScores.bestScores, songs, nextSnapshot.hotMusicIds)
@@ -159,15 +259,7 @@ async function bootstrapPage() {
 
 async function hydratePreviewCovers(rows: BjmaniaScoreListItem[]) {
   const nextSequence = ++previewCoverSequence
-  const nextMap: Record<string, string | null> = {}
-
-  await Promise.all(rows.map(async (row) => {
-    const key = getB50RowKey(row)
-    nextMap[key] = await resolveCoverImageSource(
-      row.song?.heroImageUrl ?? null,
-      row.song?.heroImageCacheKey ?? key,
-    )
-  }))
+  const nextMap = await buildCoverMap(rows)
 
   if (nextSequence !== previewCoverSequence) {
     return
@@ -185,25 +277,22 @@ async function handleExport() {
   error.value = ''
 
   try {
-    const nextMap: Record<string, string | null> = {}
+    const exportSequence = ++previewCoverSequence
+    const nextMap = await buildCoverMap(currentRows.value, { allowExportFallback: true })
+    const missingCount = countMissingCoverSources(currentRows.value, nextMap)
 
-    await Promise.all(currentRows.value.map(async (row) => {
-      const key = getB50RowKey(row)
-      const resolvedSrc = await resolveImageSourceForExport(
-        row.song?.heroImageUrl ?? null,
-        row.song?.heroImageCacheKey ?? key,
-      )
+    previewCoverMap.value = nextMap
 
-      if (resolvedSrc && await preloadImageSource(resolvedSrc)) {
-        nextMap[key] = resolvedSrc
-        return
-      }
-
-      nextMap[key] = null
-    }))
+    if (missingCount > 0) {
+      throw new Error(`仍有 ${missingCount} 张封面未准备好，请稍后再试。`)
+    }
 
     exportCoverMap.value = nextMap
     await nextTick()
+
+    if (exportSequence !== previewCoverSequence) {
+      return
+    }
 
     const result = await exportElementAsImage(
       exportPosterRef.value,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { resolveCoverImageSource, shouldUseNativeCoverCache } from '../lib/cover-cache'
+import { invalidateCoverImageCache, resolveCoverImageSource, shouldUseNativeCoverCache } from '../lib/cover-cache'
 
 const props = defineProps<{
   src: string | null
@@ -16,6 +16,7 @@ const hasError = ref(false)
 const resolvedSrc = ref<string | null>(null)
 let observer: IntersectionObserver | null = null
 let resolveSequence = 0
+let retryCount = 0
 
 function disconnectObserver() {
   observer?.disconnect()
@@ -45,6 +46,26 @@ async function resolveImageSource() {
   }
 
   resolvedSrc.value = nextSource
+}
+
+async function handleImageError() {
+  if (!props.src || !shouldUseNativeCoverCache(props.src, props.cacheKey)) {
+    hasError.value = true
+    return
+  }
+
+  const failedSource = resolvedSrc.value
+  await invalidateCoverImageCache(props.cacheKey)
+
+  if (retryCount < 1 && failedSource && failedSource !== props.src) {
+    retryCount += 1
+    hasError.value = false
+    resolvedSrc.value = null
+    void resolveImageSource()
+    return
+  }
+
+  hasError.value = true
 }
 
 function enableImage() {
@@ -107,6 +128,7 @@ onMounted(syncImageLifecycle)
 
 watch([() => props.src, () => props.cacheKey, () => props.eager], () => {
   hasError.value = false
+  retryCount = 0
   syncImageLifecycle()
 })
 
@@ -124,7 +146,7 @@ onBeforeUnmount(() => {
       decoding="async"
       :fetchpriority="eager ? 'high' : 'low'"
       :loading="eager ? 'eager' : 'lazy'"
-      @error="hasError = true"
+      @error="handleImageError"
     />
     <span v-else-if="!src || hasError">{{ fallbackText }}</span>
   </div>

@@ -550,12 +550,55 @@ function normalizeBooleanValue(value: unknown) {
   return value === true || value === 1
 }
 
+function formatRecentTimestamp(timestamp: number) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return '时间未知'
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(timestamp * 1000))
+}
+
 function recentPayloadToSheet(payload: BjmaniaRecentPlayPayload | null) {
   if (!payload || typeof payload.Seq !== 'number') {
     return null
   }
 
   return resolveScoreSheet(payload.Seq)
+}
+
+function recentClearLabel(options: {
+  clear: boolean
+  fullCombo: boolean
+  excellent: boolean
+  rawPercent: number | null
+}) {
+  if (options.excellent) {
+    return 'EXC'
+  }
+
+  if (options.fullCombo) {
+    return 'FC'
+  }
+
+  if (options.clear) {
+    return 'CLEAR'
+  }
+
+  if (options.rawPercent === -1) {
+    return 'FAILED'
+  }
+
+  if (options.rawPercent === -2) {
+    return 'NO PLAY'
+  }
+
+  return '--'
 }
 
 export function mapRecentPlaysToList(recentPlays: BjmaniaRecentPlay[], songs: SongViewModel[]) {
@@ -568,10 +611,17 @@ export function mapRecentPlaysToList(recentPlays: BjmaniaRecentPlay[], songs: So
     const sheet = recentPayloadToSheet(payload)
     const rawPercent = typeof payload?.Perc === 'number' ? payload.Perc : null
     const rawScore = typeof payload?.Score === 'number' ? payload.Score : null
-    const rank = typeof payload?.Rank === 'number' ? payload.Rank : 0
+    const rank = typeof payload?.Rank === 'number' ? payload.Rank : null
+    const rawSkill = typeof payload?.Skill === 'number' ? payload.Skill : null
+    const rawNewSkill = typeof payload?.NewSkill === 'number' ? payload.NewSkill : null
+    const rawCombo = typeof payload?.Combo === 'number' ? payload.Combo : null
     const clear = normalizeBooleanValue(payload?.Clear)
     const fullCombo = normalizeBooleanValue(payload?.FullCombo)
     const excellent = normalizeBooleanValue(payload?.Excellent)
+    const difficultyRaw =
+      sheet && song
+        ? song.metadata.xgDiffList[getDifficultyIndex(sheet.family, sheet.skillFumen)] ?? 0
+        : 0
     let scoreText = rawScore !== null ? String(rawScore) : '--'
 
     if (excellent) {
@@ -585,15 +635,35 @@ export function mapRecentPlaysToList(recentPlays: BjmaniaRecentPlay[], songs: So
     return {
       format: entry.format,
       timestamp: entry.timestamp,
+      musicId,
       song,
       family: sheet?.family ?? null,
       instrument: sheet?.instrument ?? null,
       branchLabel: sheet?.branchLabel ?? null,
       level: sheet?.level ?? null,
       sheetLabel: sheet?.label ?? '--',
+      percRaw: rawPercent,
+      rank,
+      clear,
+      autoClear: normalizeBooleanValue(payload?.AutoClear),
+      fullCombo,
+      excellent,
+      difficultyRaw,
+      difficultyText: rawDifficultyToText(difficultyRaw),
+      scoreRaw: rawScore,
+      comboRaw: rawCombo,
+      skillRaw: rawSkill,
+      newSkillRaw: rawNewSkill,
       percText: rawPercent !== null ? rawPercentToText(rawPercent) : '--',
-      rankLabel: rankToLabel(rank),
+      rankLabel: rank !== null ? rankToLabel(rank) : '--',
       scoreText,
+      playedAtText: formatRecentTimestamp(entry.timestamp),
+      skillText: rawSkill !== null ? rawSkillToText(rawSkill) : '--',
+      newSkillText: rawNewSkill !== null ? rawSkillToText(rawNewSkill) : '--',
+      comboText: rawCombo !== null ? String(rawCombo) : '--',
+      clearLabel: recentClearLabel({ clear, fullCombo, excellent, rawPercent }),
+      comment: entry.comment,
+      payload,
     }
   })
 }

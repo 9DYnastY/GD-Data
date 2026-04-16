@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import boardBackgroundSrc from '../assets/skill-page/Player_Board/background.svg'
 import b50ButtonSrc from '../assets/skill-page/Player_Board/b50_button.svg'
 import logoutButtonSrc from '../assets/skill-page/Player_Board/logout_button.svg'
+import playHistoryButtonSrc from '../assets/skill-page/Player_Board/playhistory_button.svg'
 import skillIconSrc from '../assets/skill-page/Player_Board/Skill_icon.svg'
 import { resolveSkillToneStyle, splitSkillValueText } from '../lib/skill-tone'
 
@@ -18,6 +19,7 @@ const props = defineProps<{
 
 defineEmits<{
   generateB50: []
+  playHistory: []
   signOut: []
 }>()
 
@@ -101,8 +103,8 @@ onBeforeUnmount(() => {
         <button
           class="skill-profile-board__action skill-profile-board__action--b50"
           type="button"
-          aria-label="Generate B50"
-          title="Generate B50"
+          aria-label="生成 B50"
+          title="生成 B50"
           @click="$emit('generateB50')"
         >
           <img :src="b50ButtonSrc" alt="" aria-hidden="true" />
@@ -110,10 +112,21 @@ onBeforeUnmount(() => {
         </button>
 
         <button
+          class="skill-profile-board__action skill-profile-board__action--history"
+          type="button"
+          aria-label="游玩历史"
+          title="游玩历史"
+          @click="$emit('playHistory')"
+        >
+          <img :src="playHistoryButtonSrc" alt="" aria-hidden="true" />
+          <span>游玩历史</span>
+        </button>
+
+        <button
           class="skill-profile-board__action skill-profile-board__action--logout"
           type="button"
-          aria-label="Sign out"
-          title="Sign out"
+          aria-label="账号登出"
+          title="账号登出"
           @click="$emit('signOut')"
         >
           <img :src="logoutButtonSrc" alt="" aria-hidden="true" />
@@ -274,38 +287,45 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 3px;
   width: 107px;
-  height: 42px;
-  padding: 0 10px 0 2px;
+  height: 32px;
+  padding: 0 9px 0 4px;
   border: 1.747px solid #2f00b2;
-  border-radius: 10px;
+  border-radius: 5px;
   background: #5229c0;
   box-shadow: 0 14px 32px rgba(32, 9, 86, 0.22);
   cursor: pointer;
+  transform: scale(1.2);
+  transform-origin: top right;
 }
 
 .skill-profile-board__action img {
   flex: none;
-  width: 32px;
-  height: 32px;
+  width: 25px;
+  height: 25px;
 }
 
 .skill-profile-board__action span {
   color: #f8f8f8;
   font-family: var(--font-figma-title);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
-  line-height: 17px;
+  line-height: 16px;
   letter-spacing: 0.44px;
   white-space: nowrap;
 }
 
 .skill-profile-board__action--b50 {
-  top: 107px;
+  top: 105px;
+  left: 155px;
+}
+
+.skill-profile-board__action--history {
+  top: 150px;
   left: 155px;
 }
 
 .skill-profile-board__action--logout {
-  top: 160px;
+  top: 195px;
   left: 155px;
 }
 </style>

@@ -25,6 +25,14 @@ const router = createRouter({
       component: () => import('../views/B50View.vue'),
     },
     {
+      path: '/skill/history',
+      name: 'skill-history',
+      component: () => import('../views/RecentPlayHistoryView.vue'),
+      meta: {
+        showSharedBackground: true,
+      },
+    },
+    {
       path: '/song/:musicId',
       name: 'song-detail',
       component: () => import('../views/SongDetailView.vue'),

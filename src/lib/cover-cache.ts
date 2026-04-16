@@ -1,8 +1,16 @@
 import { Capacitor } from '@capacitor/core'
 
 const COVER_CACHE_DIRECTORY = 'cover-cache'
+const MIN_VALID_COVER_BYTES = 1024
 const inflightCoverLoads = new Map<string, Promise<string>>()
 const resolvedCoverSources = new Map<string, string>()
+
+type CoverCacheMetadata = {
+  source: string
+  size: number
+  contentLength: number | null
+  savedAt: number
+}
 
 function isDirectoryAlreadyExistsError(error: unknown) {
   return (
@@ -33,6 +41,15 @@ function buildCachePath(cacheKey: string) {
   return `${COVER_CACHE_DIRECTORY}/${cacheKey}`
 }
 
+function buildCacheMetaPath(cachePath: string) {
+  return `${cachePath}.meta.json`
+}
+
+function appendCacheVersion(source: string, size: number, mtime: number) {
+  const separator = source.includes('?') ? '&' : '?'
+  return `${source}${separator}v=${encodeURIComponent(`${mtime}-${size}`)}`
+}
+
 async function getCacheFileUri(cachePath: string) {
   const { Directory, Filesystem } = await import('@capacitor/filesystem')
 
@@ -56,6 +73,103 @@ async function getCacheFileUri(cachePath: string) {
   return file.uri
 }
 
+async function deleteCacheFile(path: string) {
+  const { Directory, Filesystem } = await import('@capacitor/filesystem')
+
+  try {
+    await Filesystem.deleteFile({
+      path,
+      directory: Directory.Data,
+    })
+  } catch {
+    // Missing files and cleanup failures should not block a new download attempt.
+  }
+}
+
+async function deleteCachedCover(cachePath: string) {
+  resolvedCoverSources.delete(cachePath)
+  await Promise.all([
+    deleteCacheFile(cachePath),
+    deleteCacheFile(buildCacheMetaPath(cachePath)),
+  ])
+}
+
+async function readCacheMetadata(cachePath: string) {
+  const { Directory, Encoding, Filesystem } = await import('@capacitor/filesystem')
+
+  try {
+    const result = await Filesystem.readFile({
+      path: buildCacheMetaPath(cachePath),
+      directory: Directory.Data,
+      encoding: Encoding.UTF8,
+    })
+
+    if (typeof result.data !== 'string') {
+      return null
+    }
+
+    return JSON.parse(result.data) as CoverCacheMetadata
+  } catch {
+    return null
+  }
+}
+
+async function writeCacheMetadata(cachePath: string, metadata: CoverCacheMetadata) {
+  const { Directory, Encoding, Filesystem } = await import('@capacitor/filesystem')
+
+  await Filesystem.writeFile({
+    path: buildCacheMetaPath(cachePath),
+    directory: Directory.Data,
+    encoding: Encoding.UTF8,
+    data: JSON.stringify(metadata),
+  })
+}
+
+function isTrustedCacheFile(
+  source: string,
+  size: number,
+  metadata: CoverCacheMetadata | null,
+) {
+  if (!metadata) {
+    return false
+  }
+
+  if (metadata.source !== source || metadata.size !== size) {
+    return false
+  }
+
+  if (metadata.contentLength !== null && metadata.contentLength > 0 && size < metadata.contentLength) {
+    return false
+  }
+
+  return true
+}
+
+function canDecodeImageSource(source: string) {
+  if (typeof Image === 'undefined') {
+    return Promise.resolve(true)
+  }
+
+  return new Promise<boolean>((resolve) => {
+    const image = new Image()
+    image.decoding = 'sync'
+    image.onload = () => {
+      const hasDimensions = image.naturalWidth > 0 && image.naturalHeight > 0
+
+      if (typeof image.decode === 'function') {
+        void image.decode()
+          .then(() => resolve(hasDimensions))
+          .catch(() => resolve(false))
+        return
+      }
+
+      resolve(hasDimensions)
+    }
+    image.onerror = () => resolve(false)
+    image.src = source
+  })
+}
+
 function isRemoteImageSource(source: string) {
   return /^https?:\/\//i.test(source)
 }
@@ -77,7 +191,7 @@ export function shouldUseNativeCoverCache(source: string | null, cacheKey?: stri
   return Boolean(source && cacheKey && isNativeRuntime() && isRemoteImageSource(source))
 }
 
-async function resolveCachedFileUri(cachePath: string) {
+async function resolveCachedFileUri(source: string, cachePath: string) {
   const cachedSource = resolvedCoverSources.get(cachePath)
 
   if (cachedSource) {
@@ -91,7 +205,30 @@ async function resolveCachedFileUri(cachePath: string) {
       path: cachePath,
       directory: Directory.Data,
     })
-    const resolvedSource = Capacitor.convertFileSrc(file.uri)
+
+    if (file.size < MIN_VALID_COVER_BYTES) {
+      await deleteCachedCover(cachePath)
+      return null
+    }
+
+    const metadata = await readCacheMetadata(cachePath)
+
+    if (!isTrustedCacheFile(source, file.size, metadata)) {
+      await deleteCachedCover(cachePath)
+      return null
+    }
+
+    const resolvedSource = appendCacheVersion(
+      Capacitor.convertFileSrc(file.uri),
+      file.size,
+      file.mtime,
+    )
+
+    if (!await canDecodeImageSource(resolvedSource)) {
+      await deleteCachedCover(cachePath)
+      return null
+    }
+
     resolvedCoverSources.set(cachePath, resolvedSource)
     return resolvedSource
   } catch {
@@ -101,14 +238,80 @@ async function resolveCachedFileUri(cachePath: string) {
 
 async function downloadCoverToCache(source: string, cachePath: string) {
   const { FileTransfer } = await import('@capacitor/file-transfer')
-  const targetUri = await getCacheFileUri(cachePath)
+  const { Directory, Filesystem } = await import('@capacitor/filesystem')
+  const tempPath = `${cachePath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const targetUri = await getCacheFileUri(tempPath)
+  let downloadedBytes = 0
+  let contentLength: number | null = null
 
-  await FileTransfer.downloadFile({
-    url: source,
-    path: targetUri,
+  const progressHandle = await FileTransfer.addListener('progress', (progress) => {
+    if (progress.type !== 'download' || progress.url !== source) {
+      return
+    }
+
+    downloadedBytes = progress.bytes
+    contentLength = progress.contentLength > 0 ? progress.contentLength : null
   })
 
-  return await resolveCachedFileUri(cachePath)
+  try {
+    await FileTransfer.downloadFile({
+      url: source,
+      path: targetUri,
+      progress: true,
+    })
+
+    const tempFile = await Filesystem.stat({
+      path: tempPath,
+      directory: Directory.Data,
+    })
+
+    const expectedBytes = contentLength ?? downloadedBytes
+
+    if (tempFile.size < MIN_VALID_COVER_BYTES) {
+      throw new Error('Downloaded cover is too small.')
+    }
+
+    if (expectedBytes > 0 && tempFile.size < expectedBytes) {
+      throw new Error('Downloaded cover is incomplete.')
+    }
+
+    const tempSource = appendCacheVersion(
+      Capacitor.convertFileSrc(tempFile.uri),
+      tempFile.size,
+      tempFile.mtime,
+    )
+
+    if (!await canDecodeImageSource(tempSource)) {
+      throw new Error('Downloaded cover cannot be decoded.')
+    }
+
+    await deleteCachedCover(cachePath)
+    await Filesystem.rename({
+      from: tempPath,
+      to: cachePath,
+      directory: Directory.Data,
+      toDirectory: Directory.Data,
+    })
+
+    const finalFile = await Filesystem.stat({
+      path: cachePath,
+      directory: Directory.Data,
+    })
+
+    await writeCacheMetadata(cachePath, {
+      source,
+      size: finalFile.size,
+      contentLength,
+      savedAt: Date.now(),
+    })
+
+    return await resolveCachedFileUri(source, cachePath)
+  } catch (error) {
+    await deleteCacheFile(tempPath)
+    throw error
+  } finally {
+    await progressHandle.remove()
+  }
 }
 
 export async function resolveCoverImageSource(source: string | null, cacheKey?: string | null) {
@@ -121,7 +324,7 @@ export async function resolveCoverImageSource(source: string | null, cacheKey?: 
   }
 
   const cachePath = buildCachePath(cacheKey!)
-  const existingSource = await resolveCachedFileUri(cachePath)
+  const existingSource = await resolveCachedFileUri(source, cachePath)
 
   if (existingSource) {
     return existingSource
@@ -145,4 +348,13 @@ export async function resolveCoverImageSource(source: string | null, cacheKey?: 
 
   inflightCoverLoads.set(cachePath, nextSourcePromise)
   return nextSourcePromise
+}
+
+export async function invalidateCoverImageCache(cacheKey?: string | null) {
+  if (!cacheKey || !isNativeRuntime()) {
+    return
+  }
+
+  const cachePath = buildCachePath(cacheKey)
+  await deleteCachedCover(cachePath)
 }

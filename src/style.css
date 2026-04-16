@@ -16,6 +16,22 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: 'rpt';
+  src: url('/fonts/arbfonts-rpt-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'ITC Avant Garde Gothic Std Medium Condensed';
+  src: url('/fonts/ITC Avant Garde Gothic Std Medium Condensed.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #0a0a0f;
   --bg-overlay: rgba(10, 10, 15, 0.78);

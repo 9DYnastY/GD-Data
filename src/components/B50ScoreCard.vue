@@ -106,6 +106,22 @@ function splitRateValueText(value: string) {
   }
 }
 
+function splitPaddedValueText(value: string, width: number) {
+  const parts = splitValueText(value)
+
+  if (!/^\d+$/.test(parts.whole)) {
+    return {
+      ...parts,
+      pad: '',
+    }
+  }
+
+  return {
+    ...parts,
+    pad: '0'.repeat(Math.max(0, width - parts.whole.length)),
+  }
+}
+
 const title = computed(() => props.row.song?.displayTitle ?? `Music #${props.row.musicId}`)
 const coverSrc = computed(() => props.coverSrcOverride ?? props.row.song?.heroImageUrl ?? null)
 const coverFallback = computed(() => props.row.song?.imageFallback ?? String(props.row.musicId))
@@ -142,7 +158,7 @@ const displayRateText = computed(() => {
   return props.row.percText
 })
 const rateValueParts = computed(() => splitRateValueText(displayRateText.value))
-const skillValueParts = computed(() => splitValueText(props.row.skillCalcText))
+const skillValueParts = computed(() => splitPaddedValueText(props.row.skillCalcText, 3))
 const levelValueParts = computed(() => splitValueText(props.row.difficultyText))
 const titleStyle = computed(() => ({
   left: `${TITLE_BASE_LEFT + titleVisualOffset.value}px`,
@@ -322,6 +338,12 @@ onBeforeUnmount(() => {
 
     <img class="b50-score-card__skill-icon" :src="skillIconSrc" alt="" aria-hidden="true" />
     <strong class="b50-score-card__skill-value">
+      <span
+        v-if="skillValueParts.pad"
+        class="b50-score-card__value-pad"
+      >
+        {{ skillValueParts.pad }}
+      </span>
       <span class="b50-score-card__value-main">{{ skillValueParts.whole }}</span>
       <span v-if="skillValueParts.fraction" class="b50-score-card__value-fraction">
         {{ skillValueParts.fraction }}
@@ -628,11 +650,16 @@ onBeforeUnmount(() => {
   letter-spacing: -0.1em;
 }
 
+.b50-score-card__value-pad,
 .b50-score-card__value-main,
 .b50-score-card__value-fraction {
   display: inline-block;
   line-height: 0.92;
   vertical-align: baseline;
+}
+
+.b50-score-card__value-pad {
+  visibility: hidden;
 }
 
 .b50-score-card__value-fraction {

@@ -116,9 +116,30 @@ export interface BjmaniaRecentPlayPayload {
   Rank?: number
   Meter?: string | number
   MeterProg?: number
+  PhraseDataNum?: number
+  PhraseEndAddr?: number
+  PhraseAddr?: unknown
+  PhraseType?: unknown
+  PhraseStatus?: unknown
   Score?: number
   Combo?: number
+  MaxComboPerc?: number
   Medal?: number
+  Flags?: unknown
+  PhraseComboPerc?: unknown
+  Perfect?: number
+  Great?: number
+  Good?: number
+  Ok?: number
+  Miss?: number
+  PerfectPerc?: number
+  GreatPerc?: number
+  GoodPerc?: number
+  OkPerc?: number
+  MissPerc?: number
+  BeforeMeter?: string | number
+  BeforeMeterProg?: number
+  IsNewMeter?: boolean | number
   [key: string]: unknown
 }
 
@@ -183,13 +204,33 @@ export interface BjmaniaScoreListItem {
 export interface BjmaniaRecentListItem {
   format: string
   timestamp: number
+  musicId: number | null
   song: SongViewModel | null
   family: BjmaniaScoreFamily | null
   instrument: InstrumentKey | null
   branchLabel: string | null
   level: LevelKey | null
   sheetLabel: string
+  percRaw: number | null
+  rank: number | null
+  clear: boolean
+  autoClear: boolean
+  fullCombo: boolean
+  excellent: boolean
+  difficultyRaw: number
+  difficultyText: string
+  scoreRaw: number | null
+  comboRaw: number | null
+  skillRaw: number | null
+  newSkillRaw: number | null
   percText: string
   rankLabel: string
   scoreText: string
+  playedAtText: string
+  skillText: string
+  newSkillText: string
+  comboText: string
+  clearLabel: string
+  comment: string
+  payload: BjmaniaRecentPlayPayload | null
 }

@@ -8,7 +8,9 @@ import AppBottomNav from './components/AppBottomNav.vue'
 const route = useRoute()
 const router = useRouter()
 const showBottomNav = computed(() => route.meta.showBottomNav === true)
-const showSharedBackground = computed(() => route.meta.showBottomNav === true)
+const showSharedBackground = computed(() => (
+  route.meta.showBottomNav === true || route.meta.showSharedBackground === true
+))
 const exitToastVisible = ref(false)
 const backgroundVideoRef = ref<HTMLVideoElement | null>(null)
 const backgroundVideoReady = ref(false)
@@ -41,6 +43,11 @@ function showExitToast() {
 
 async function handleAndroidBackButton() {
   if (route.name === 'skill-b50') {
+    await router.replace({ name: 'skill' })
+    return
+  }
+
+  if (route.name === 'skill-history') {
     await router.replace({ name: 'skill' })
     return
   }
