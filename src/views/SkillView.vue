@@ -656,11 +656,14 @@ onBeforeUnmount(() => {
   left: 0;
   right: 0;
   z-index: 30;
-  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
+  overflow: visible;
 }
 
 .top-shell__purple {
+  position: relative;
+  z-index: 2;
   background: #4b3b76;
+  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
 }
 
 .top-shell__bar {
@@ -752,9 +755,15 @@ onBeforeUnmount(() => {
 }
 
 .filter-drawer {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1;
   width: min(100%, 402px);
   margin: 0 auto;
   padding: 14px 11px 0;
+  transform-origin: top center;
 }
 
 .profile-flyout-shell {
@@ -1114,13 +1123,15 @@ onBeforeUnmount(() => {
 
 .panel-fade-enter-active,
 .panel-fade-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition:
+    opacity 0.16s ease,
+    transform 0.24s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .panel-fade-enter-from,
 .panel-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
+  opacity: 0.92;
+  transform: translateY(calc(-100% - 1px));
 }
 
 .menu-fade-enter-active,

@@ -6,7 +6,17 @@ import SongCard from '../components/SongCard.vue'
 import bassModeToggleSrc from '../assets/songlist-toggle/bass-mode.svg'
 import drumModeToggleSrc from '../assets/songlist-toggle/drum-mode.svg'
 import guitarModeToggleSrc from '../assets/songlist-toggle/guitar-mode.svg'
+import { loadBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
+import {
+  filterScoresByFamily,
+  mapBestScoresToList,
+} from '../lib/bjmania/client'
+import { preloadCoverImages, preloadCoverImagesNow } from '../lib/cover-preload'
 import { loadSongCatalog } from '../lib/song-catalog'
+import type {
+  BjmaniaScoreFamily,
+  BjmaniaScoreListItem,
+} from '../types/bjmania'
 import type { InstrumentKey, SongViewModel } from '../types/song'
 
 type SearchSortOption =
@@ -30,6 +40,9 @@ type SearchFilters = {
 
 const SEARCH_STORAGE_KEY = 'gddata:last-search'
 const PAGE_SIZE = 20
+const VISIBLE_COVER_PRELOAD_LIMIT = 8
+const SKILL_COVER_PRELOAD_LIMIT_PER_FAMILY = 8
+const STARTUP_COVER_PRELOAD_TIMEOUT_MS = 2800
 const FULL_DIFFICULTY_MIN = 0
 const FULL_DIFFICULTY_MAX = 99
 const DIFFICULTY_STOPS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99]
@@ -149,6 +162,67 @@ const sortOptions: Array<{ label: string; value: SearchSortOption }> = [
 ]
 
 let loadMoreObserver: IntersectionObserver | null = null
+
+function sortDefaultSkillRows(rows: BjmaniaScoreListItem[]) {
+  return rows
+    .filter((row) => !row.isDeleted)
+    .slice()
+    .sort((left, right) => (
+      right.skillCalcRaw - left.skillCalcRaw ||
+      right.percRaw - left.percRaw
+    ))
+}
+
+function buildCoverPreloadTargetsFromSongs(nextSongs: SongViewModel[], limit: number) {
+  return nextSongs.slice(0, limit).map((song) => ({
+    src: song.heroImageUrl,
+    cacheKey: song.heroImageCacheKey,
+  }))
+}
+
+function buildCoverPreloadTargetsFromSkillRows(rows: BjmaniaScoreListItem[], family: BjmaniaScoreFamily) {
+  return sortDefaultSkillRows(filterScoresByFamily(rows, family))
+    .slice(0, SKILL_COVER_PRELOAD_LIMIT_PER_FAMILY)
+    .map((row) => ({
+      src: row.song?.heroImageUrl ?? null,
+      cacheKey: row.song?.heroImageCacheKey ?? `${family}_${row.musicId}_${row.instrument}`,
+    }))
+}
+
+function preloadVisibleSongCovers(nextSongs: SongViewModel[]) {
+  preloadCoverImages(
+    buildCoverPreloadTargetsFromSongs(nextSongs, VISIBLE_COVER_PRELOAD_LIMIT),
+    {
+      limit: VISIBLE_COVER_PRELOAD_LIMIT,
+      concurrency: 2,
+    },
+  )
+}
+
+function preloadCachedSkillCovers(songCatalog: SongViewModel[]) {
+  const cached = loadBjmaniaSkillSnapshotCache()
+
+  if (!cached) {
+    return
+  }
+
+  const rows = mapBestScoresToList(
+    cached.snapshot.bestScores.bestScores,
+    songCatalog,
+    cached.snapshot.hotMusicIds,
+  )
+
+  preloadCoverImages(
+    [
+      ...buildCoverPreloadTargetsFromSkillRows(rows, 'dm'),
+      ...buildCoverPreloadTargetsFromSkillRows(rows, 'gf'),
+    ],
+    {
+      limit: SKILL_COVER_PRELOAD_LIMIT_PER_FAMILY * 2,
+      concurrency: 2,
+    },
+  )
+}
 
 function parseVersionKey(versionKey: string) {
   const [gfRaw, dmRaw] = versionKey.split('-')
@@ -527,6 +601,15 @@ onMounted(async () => {
 
   try {
     songs.value = await loadSongCatalog()
+    await preloadCoverImagesNow(
+      buildCoverPreloadTargetsFromSongs(filteredSongs.value, VISIBLE_COVER_PRELOAD_LIMIT),
+      {
+        limit: VISIBLE_COVER_PRELOAD_LIMIT,
+        concurrency: 3,
+        timeoutMs: STARTUP_COVER_PRELOAD_TIMEOUT_MS,
+      },
+    )
+    preloadCachedSkillCovers(songs.value)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Failed to load catalog'
   } finally {
@@ -541,6 +624,14 @@ watch(
   async () => {
     await nextTick()
     setupLoadMoreObserver()
+  },
+  { flush: 'post' },
+)
+
+watch(
+  visibleSongs,
+  (nextSongs) => {
+    preloadVisibleSongCovers(nextSongs)
   },
   { flush: 'post' },
 )
@@ -753,9 +844,10 @@ function compareMasterDifficulty(
         />
 
         <SongCard
-          v-for="song in visibleSongs"
+          v-for="(song, index) in visibleSongs"
           v-else
           :key="song.musicId"
+          :eager-cover="index < VISIBLE_COVER_PRELOAD_LIMIT"
           :song="song"
           :selected-instrument="selectedInstrument"
         />
@@ -801,7 +893,6 @@ function compareMasterDifficulty(
   padding: var(--home-content-top-padding) 14px 36px;
 }
 
-.top-shell,
 .load-more-card {
   backdrop-filter: blur(10px);
 }
@@ -812,11 +903,14 @@ function compareMasterDifficulty(
   left: 0;
   right: 0;
   z-index: 30;
-  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
+  overflow: visible;
 }
 
 .top-shell__purple {
+  position: relative;
+  z-index: 2;
   background: #4b3b76;
+  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
 }
 
 .top-shell__bar {
@@ -884,10 +978,16 @@ function compareMasterDifficulty(
 }
 
 .filter-drawer {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1;
   width: min(100%, 402px);
   margin: 0 auto;
   background: #ffffff;
   padding: 14px 11px 22px;
+  transform-origin: top center;
 }
 
 .filter-drawer__controls {
@@ -1095,13 +1195,15 @@ function compareMasterDifficulty(
 
 .panel-fade-enter-active,
 .panel-fade-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition:
+    opacity 0.16s ease,
+    transform 0.24s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .panel-fade-enter-from,
 .panel-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
+  opacity: 0.92;
+  transform: translateY(calc(-100% - 1px));
 }
 
 .menu-fade-enter-active,

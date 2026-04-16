@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import DifficultyGrid from './DifficultyGrid.vue'
 import LazyCoverImage from './LazyCoverImage.vue'
+import songCardBackgroundSrc from '../assets/song-page/Card_Song/rounded-background.svg'
 import type { InstrumentKey, SongViewModel } from '../types/song'
 
 const CARD_WIDTH = 375
@@ -68,6 +69,7 @@ const GD_LOGO_MAP: Record<number, string> = {
 const props = defineProps<{
   song: SongViewModel
   selectedInstrument: InstrumentKey
+  eagerCover?: boolean
 }>()
 
 const cardRoot = ref<HTMLElement | null>(null)
@@ -178,8 +180,13 @@ const versionLogoSrc = computed(() => resolveVersionLogo(props.song.versionKey, 
           transform: `scale(${cardScale})`,
         }"
       >
+        <img
+          class="song-card__background"
+          :src="songCardBackgroundSrc"
+          alt=""
+          aria-hidden="true"
+        />
         <svg class="song-card__frame" viewBox="0 0 375 199" preserveAspectRatio="none" aria-hidden="true">
-        <rect opacity="0.9" x="1" y="1" width="372.42" height="197" rx="16" fill="#D9D9D9" stroke="#2F00B2" stroke-width="2" />
         <g opacity="0.8">
           <path d="M320.504 190.14C319.673 189.378 319.639 188.108 320.428 187.302L326.153 181.458C326.942 180.653 328.255 180.618 329.085 181.38C329.916 182.141 329.95 183.412 329.161 184.217L323.436 190.061C322.648 190.867 321.335 190.902 320.504 190.14Z" fill="#8473B1" />
           <path d="M329.085 190.14C328.255 189.378 328.221 188.108 329.01 187.302L334.735 181.458C335.523 180.653 336.836 180.618 337.667 181.38C338.498 182.141 338.532 183.412 337.743 184.217L332.018 190.061C331.229 190.867 329.916 190.902 329.085 190.14Z" fill="#8473B1" />
@@ -201,6 +208,7 @@ const versionLogoSrc = computed(() => resolveVersionLogo(props.song.versionKey, 
                 class="song-card__cover"
                 :alt="`${song.displayTitle} cover`"
                 :cache-key="song.heroImageCacheKey"
+                :eager="eagerCover"
                 :fallback-text="song.imageFallback"
                 :src="song.heroImageUrl"
               />
@@ -249,9 +257,8 @@ const versionLogoSrc = computed(() => resolveVersionLogo(props.song.versionKey, 
   inset: 0;
   background: transparent;
   border: 0;
-  border-radius: 17px;
   text-decoration: none;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .song-card__stage {
@@ -262,6 +269,7 @@ const versionLogoSrc = computed(() => resolveVersionLogo(props.song.versionKey, 
   will-change: transform;
 }
 
+.song-card__background,
 .song-card__frame {
   position: absolute;
   inset: 0;
@@ -270,13 +278,21 @@ const versionLogoSrc = computed(() => resolveVersionLogo(props.song.versionKey, 
   pointer-events: none;
 }
 
+.song-card__background {
+  z-index: 0;
+}
+
+.song-card__frame {
+  z-index: 1;
+}
+
 .song-card__main {
   display: grid;
   grid-template-columns: 132px 219px;
   gap: 0;
   align-items: start;
   position: relative;
-  z-index: 1;
+  z-index: 2;
   height: 100%;
   padding: 9px 11px 9px 9px;
   box-sizing: border-box;

@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import AppBottomNav from './components/AppBottomNav.vue'
+
+const MAIN_ROUTE_ORDER: Record<string, number> = {
+  home: 0,
+  skill: 1,
+}
+const MAIN_ROUTE_TRANSITION_MS = 360
+const MAIN_ROUTE_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,6 +21,7 @@ const showSharedBackground = computed(() => (
 const exitToastVisible = ref(false)
 const backgroundVideoRef = ref<HTMLVideoElement | null>(null)
 const backgroundVideoReady = ref(false)
+const routeTransitionName = ref('')
 
 let backButtonListener: { remove: () => Promise<void> } | null = null
 let exitToastTimer: ReturnType<typeof setTimeout> | null = null
@@ -30,6 +38,117 @@ function clearExitToast() {
 
 function markBackgroundVideoReady() {
   backgroundVideoReady.value = true
+}
+
+function routeNameToKey(name: unknown) {
+  return typeof name === 'string' ? name : ''
+}
+
+function shouldReduceMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+}
+
+function getMainRouteInner(element: Element) {
+  return element.querySelector<HTMLElement>('.home-view__inner, .skill-view__inner')
+}
+
+function getMainRouteDirection() {
+  return routeTransitionName.value === 'main-route-back' ? -1 : 1
+}
+
+function resetRouteTransitionStyles(root: HTMLElement, inner: HTMLElement | null) {
+  root.style.position = ''
+  root.style.inset = ''
+  root.style.width = ''
+  root.style.pointerEvents = ''
+
+  if (!inner) {
+    return
+  }
+
+  inner.style.transition = ''
+  inner.style.transform = ''
+  inner.style.opacity = ''
+  inner.style.willChange = ''
+}
+
+function finishAfterMainRouteAnimation(callback: () => void) {
+  window.setTimeout(callback, MAIN_ROUTE_TRANSITION_MS + 40)
+}
+
+function handleMainRouteBeforeEnter(element: Element) {
+  if (!routeTransitionName.value || shouldReduceMotion()) {
+    return
+  }
+
+  const inner = getMainRouteInner(element)
+
+  if (!inner) {
+    return
+  }
+
+  inner.style.transition = 'none'
+  inner.style.transform = `translateX(${getMainRouteDirection() * 100}%)`
+  inner.style.opacity = '0.98'
+  inner.style.willChange = 'transform, opacity'
+}
+
+function handleMainRouteEnter(element: Element, done: () => void) {
+  if (!routeTransitionName.value || shouldReduceMotion()) {
+    done()
+    return
+  }
+
+  const root = element as HTMLElement
+  const inner = getMainRouteInner(element)
+
+  if (!inner) {
+    done()
+    return
+  }
+
+  requestAnimationFrame(() => {
+    inner.style.transition = `transform ${MAIN_ROUTE_TRANSITION_MS}ms ${MAIN_ROUTE_EASING}, opacity 240ms ease`
+    inner.style.transform = 'translateX(0)'
+    inner.style.opacity = '1'
+  })
+
+  finishAfterMainRouteAnimation(() => {
+    resetRouteTransitionStyles(root, inner)
+    done()
+  })
+}
+
+function handleMainRouteLeave(element: Element, done: () => void) {
+  if (!routeTransitionName.value || shouldReduceMotion()) {
+    done()
+    return
+  }
+
+  const root = element as HTMLElement
+  const inner = getMainRouteInner(element)
+
+  root.style.position = 'absolute'
+  root.style.inset = '0'
+  root.style.width = '100%'
+  root.style.pointerEvents = 'none'
+
+  if (!inner) {
+    done()
+    return
+  }
+
+  requestAnimationFrame(() => {
+    inner.style.transition = `transform ${MAIN_ROUTE_TRANSITION_MS}ms ${MAIN_ROUTE_EASING}, opacity 240ms ease`
+    inner.style.transform = `translateX(${getMainRouteDirection() * -100}%)`
+    inner.style.opacity = '0.86'
+    inner.style.willChange = 'transform, opacity'
+  })
+
+  finishAfterMainRouteAnimation(() => {
+    resetRouteTransitionStyles(root, inner)
+    done()
+  })
 }
 
 function showExitToast() {
@@ -94,6 +213,27 @@ onMounted(() => {
   }
 })
 
+watch(
+  () => route.name,
+  (nextName, previousName) => {
+    const nextKey = routeNameToKey(nextName)
+    const previousKey = routeNameToKey(previousName)
+
+    if (
+      !(nextKey in MAIN_ROUTE_ORDER) ||
+      !(previousKey in MAIN_ROUTE_ORDER) ||
+      nextKey === previousKey
+    ) {
+      routeTransitionName.value = ''
+      return
+    }
+
+    routeTransitionName.value = MAIN_ROUTE_ORDER[nextKey] > MAIN_ROUTE_ORDER[previousKey]
+      ? 'main-route-forward'
+      : 'main-route-back'
+  },
+)
+
 onBeforeUnmount(() => {
   clearExitToast()
   void backButtonListener?.remove()
@@ -128,7 +268,19 @@ onBeforeUnmount(() => {
     <div class="app-background__overlay"></div>
   </div>
   <div class="app-shell" :class="{ 'app-shell--with-nav': showBottomNav }">
-    <RouterView />
+    <RouterView v-slot="{ Component, route: viewRoute }">
+      <transition
+        :css="false"
+        @before-enter="handleMainRouteBeforeEnter"
+        @enter="handleMainRouteEnter"
+        @leave="handleMainRouteLeave"
+      >
+        <component
+          :is="Component"
+          :key="viewRoute.name ?? viewRoute.fullPath"
+        />
+      </transition>
+    </RouterView>
   </div>
   <AppBottomNav v-if="showBottomNav" />
   <transition name="exit-toast">
@@ -143,6 +295,7 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 2;
   min-height: 100vh;
+  overflow-x: clip;
 }
 
 .app-shell--with-nav {
