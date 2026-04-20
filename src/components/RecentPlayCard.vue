@@ -40,10 +40,6 @@ function normalizePercentInteger(value: unknown) {
 
   const absolute = Math.abs(raw)
 
-  if (absolute <= 1 && absolute > 0) {
-    return Math.round(raw * 100)
-  }
-
   if (absolute > 100) {
     return Math.round(raw / 100)
   }

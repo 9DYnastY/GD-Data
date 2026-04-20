@@ -33,6 +33,14 @@ const router = createRouter({
       },
     },
     {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('../views/SettingsView.vue'),
+      meta: {
+        showSharedBackground: true,
+      },
+    },
+    {
       path: '/song/:musicId',
       name: 'song-detail',
       component: () => import('../views/SongDetailView.vue'),

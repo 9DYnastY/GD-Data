@@ -358,3 +358,45 @@ export async function invalidateCoverImageCache(cacheKey?: string | null) {
   const cachePath = buildCachePath(cacheKey)
   await deleteCachedCover(cachePath)
 }
+
+export async function getCoverImageCacheSize() {
+  if (!isNativeRuntime()) {
+    return 0
+  }
+
+  const { Directory, Filesystem } = await import('@capacitor/filesystem')
+
+  try {
+    const result = await Filesystem.readdir({
+      path: COVER_CACHE_DIRECTORY,
+      directory: Directory.Data,
+    })
+
+    return result.files.reduce((total, file) => {
+      return total + (file.type === 'file' ? file.size : 0)
+    }, 0)
+  } catch {
+    return 0
+  }
+}
+
+export async function clearCoverImageCache() {
+  if (!isNativeRuntime()) {
+    return
+  }
+
+  const { Directory, Filesystem } = await import('@capacitor/filesystem')
+
+  try {
+    await Filesystem.rmdir({
+      path: COVER_CACHE_DIRECTORY,
+      directory: Directory.Data,
+      recursive: true,
+    })
+  } catch {
+    // Missing cache directories and cleanup failures should not block the UI.
+  }
+
+  inflightCoverLoads.clear()
+  resolvedCoverSources.clear()
+}

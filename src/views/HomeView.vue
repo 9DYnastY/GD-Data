@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import DifficultyRangeSlider from '../components/DifficultyRangeSlider.vue'
 import EmptyState from '../components/EmptyState.vue'
 import SongCard from '../components/SongCard.vue'
+import settingsIconSrc from '../assets/search-bar/settings.svg'
 import bassModeToggleSrc from '../assets/songlist-toggle/bass-mode.svg'
 import drumModeToggleSrc from '../assets/songlist-toggle/drum-mode.svg'
 import guitarModeToggleSrc from '../assets/songlist-toggle/guitar-mode.svg'
@@ -57,6 +59,7 @@ const INSTRUMENT_TOGGLE_ASSETS: Record<InstrumentKey, string> = {
   guitar: guitarModeToggleSrc,
   bass: bassModeToggleSrc,
 }
+const router = useRouter()
 const GF_VERSION_MAP: Record<number, string> = {
   0: 'GF1st',
   1: 'GF2nd',
@@ -556,6 +559,11 @@ function submitSearch() {
   searchInputRef.value?.blur()
 }
 
+async function handleOpenSettings() {
+  closeFilters()
+  await router.push({ name: 'settings' })
+}
+
 function cycleInstrument() {
   const currentIndex = INSTRUMENT_ORDER.indexOf(selectedInstrument.value)
   selectedInstrument.value = INSTRUMENT_ORDER[(currentIndex + 1) % INSTRUMENT_ORDER.length]
@@ -671,7 +679,7 @@ function compareMasterDifficulty(
   <section class="home-view">
     <header ref="topShellRef" class="top-shell">
       <div class="top-shell__purple">
-        <div class="top-shell__bar">
+        <div class="top-shell__bar top-shell__bar--home">
           <label class="search-shell">
             <input
               ref="searchInputRef"
@@ -695,6 +703,15 @@ function compareMasterDifficulty(
               </svg>
             </button>
           </label>
+
+          <button
+            class="settings-badge"
+            type="button"
+            aria-label="打开软件设置"
+            @click="handleOpenSettings"
+          >
+            <img class="settings-badge__icon" :src="settingsIconSrc" alt="" aria-hidden="true" />
+          </button>
         </div>
       </div>
 
@@ -919,6 +936,13 @@ function compareMasterDifficulty(
   padding: var(--home-top-bar-padding) 11px 15px;
 }
 
+.top-shell__bar--home {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
 .search-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -963,6 +987,27 @@ function compareMasterDifficulty(
   background: transparent;
   color: #49454f;
   cursor: pointer;
+}
+
+.settings-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-badge__icon {
+  display: block;
+  width: 30px;
+  height: 30px;
 }
 
 .search-shell__button svg,

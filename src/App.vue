@@ -4,6 +4,15 @@ import { Capacitor } from '@capacitor/core'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import AppBottomNav from './components/AppBottomNav.vue'
+import {
+  appUpdateDialogVisible,
+  availableAppUpdate,
+  checkForAppUpdate,
+  closeAppUpdateDialog,
+  ignoreCurrentAppUpdate,
+  openAppUpdateReleasePage,
+  postponeAppUpdate,
+} from './lib/app-update'
 
 const MAIN_ROUTE_ORDER: Record<string, number> = {
   home: 0,
@@ -160,6 +169,11 @@ function showExitToast() {
   }, 1800)
 }
 
+async function handleOpenUpdateReleasePage() {
+  await openAppUpdateReleasePage()
+  closeAppUpdateDialog()
+}
+
 async function handleAndroidBackButton() {
   if (route.name === 'skill-b50') {
     await router.replace({ name: 'skill' })
@@ -168,6 +182,11 @@ async function handleAndroidBackButton() {
 
   if (route.name === 'skill-history') {
     await router.replace({ name: 'skill' })
+    return
+  }
+
+  if (route.name === 'settings') {
+    await router.replace({ name: 'home' })
     return
   }
 
@@ -207,6 +226,9 @@ async function attachAndroidBackButtonListener() {
 
 onMounted(() => {
   void attachAndroidBackButtonListener()
+  void checkForAppUpdate('auto').catch(() => {
+    // Automatic update checks should not interrupt normal startup.
+  })
 
   if (backgroundVideoRef.value && backgroundVideoRef.value.readyState >= 2) {
     backgroundVideoReady.value = true
@@ -286,6 +308,37 @@ onBeforeUnmount(() => {
   <transition name="exit-toast">
     <div v-if="exitToastVisible" class="exit-toast" role="status" aria-live="polite">
       再次返回回到桌面
+    </div>
+  </transition>
+  <transition name="app-update-dialog">
+    <div
+      v-if="appUpdateDialogVisible && availableAppUpdate"
+      class="app-update-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="app-update-dialog-title"
+    >
+      <div class="app-update-dialog__card">
+        <p class="app-update-dialog__eyebrow">发现更新</p>
+        <h2 id="app-update-dialog-title">发现新版本 v{{ availableAppUpdate.manifest.versionName }}</h2>
+        <p class="app-update-dialog__summary">
+          当前版本 v{{ availableAppUpdate.current.versionName }}，可以前往发布页下载最新 Android APK。
+        </p>
+        <ul v-if="availableAppUpdate.manifest.notes.length" class="app-update-dialog__notes">
+          <li v-for="note in availableAppUpdate.manifest.notes" :key="note">{{ note }}</li>
+        </ul>
+        <div class="app-update-dialog__actions">
+          <button class="app-update-dialog__button app-update-dialog__button--ghost" type="button" @click="ignoreCurrentAppUpdate">
+            忽略此版本
+          </button>
+          <button class="app-update-dialog__button app-update-dialog__button--ghost" type="button" @click="postponeAppUpdate">
+            稍后
+          </button>
+          <button class="app-update-dialog__button" type="button" @click="handleOpenUpdateReleasePage">
+            下载更新
+          </button>
+        </div>
+      </div>
     </div>
   </transition>
 </template>
@@ -375,5 +428,112 @@ onBeforeUnmount(() => {
 .exit-toast-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(10px);
+}
+
+.app-update-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(20, 12, 48, 0.34);
+  backdrop-filter: blur(8px);
+}
+
+.app-update-dialog__card {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 352px);
+  padding: 20px;
+  border: 1px solid rgba(79, 55, 138, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 56px rgba(31, 16, 63, 0.24);
+}
+
+.app-update-dialog__eyebrow,
+.app-update-dialog__card h2,
+.app-update-dialog__summary,
+.app-update-dialog__notes {
+  margin: 0;
+}
+
+.app-update-dialog__eyebrow {
+  color: #ff8f2f;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.app-update-dialog__card h2 {
+  color: #1d1741;
+  font-size: 1.18rem;
+  line-height: 1.25;
+}
+
+.app-update-dialog__summary,
+.app-update-dialog__notes {
+  color: rgba(73, 69, 79, 0.82);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.app-update-dialog__notes {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+}
+
+.app-update-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.app-update-dialog__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #4f378a;
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.app-update-dialog__button--ghost {
+  background: rgba(79, 55, 138, 0.1);
+  color: #4f378a;
+}
+
+.app-update-dialog-enter-active,
+.app-update-dialog-leave-active {
+  transition: opacity 0.16s ease;
+}
+
+.app-update-dialog-enter-active .app-update-dialog__card,
+.app-update-dialog-leave-active .app-update-dialog__card {
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), opacity 0.16s ease;
+}
+
+.app-update-dialog-enter-from,
+.app-update-dialog-leave-to {
+  opacity: 0;
+}
+
+.app-update-dialog-enter-from .app-update-dialog__card,
+.app-update-dialog-leave-to .app-update-dialog__card {
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
 }
 </style>
