@@ -5,13 +5,18 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import AppBottomNav from './components/AppBottomNav.vue'
 import {
+  appUpdateActionError,
   appUpdateDialogVisible,
+  appUpdateIsBusy,
+  appUpdatePrimaryActionLabel,
+  appUpdateProgressDetail,
+  appUpdateProgressRatio,
+  appUpdateStatusMessage,
   availableAppUpdate,
   checkForAppUpdate,
-  closeAppUpdateDialog,
   ignoreCurrentAppUpdate,
-  openAppUpdateReleasePage,
   postponeAppUpdate,
+  startAppUpdateDownload,
 } from './lib/app-update'
 
 const MAIN_ROUTE_ORDER: Record<string, number> = {
@@ -169,9 +174,8 @@ function showExitToast() {
   }, 1800)
 }
 
-async function handleOpenUpdateReleasePage() {
-  await openAppUpdateReleasePage()
-  closeAppUpdateDialog()
+async function handleStartAppUpdateDownload() {
+  await startAppUpdateDownload()
 }
 
 async function handleAndroidBackButton() {
@@ -319,23 +323,51 @@ onBeforeUnmount(() => {
       aria-labelledby="app-update-dialog-title"
     >
       <div class="app-update-dialog__card">
-        <p class="app-update-dialog__eyebrow">发现更新</p>
         <h2 id="app-update-dialog-title">发现新版本 v{{ availableAppUpdate.manifest.versionName }}</h2>
         <p class="app-update-dialog__summary">
-          当前版本 v{{ availableAppUpdate.current.versionName }}，可以前往发布页下载最新 Android APK。
+          当前版本 v{{ availableAppUpdate.current.versionName }}，下载完成后会自动打开安装包。
         </p>
         <ul v-if="availableAppUpdate.manifest.notes.length" class="app-update-dialog__notes">
           <li v-for="note in availableAppUpdate.manifest.notes" :key="note">{{ note }}</li>
         </ul>
+        <div v-if="appUpdateStatusMessage" class="app-update-dialog__progress-block">
+          <div class="app-update-dialog__progress-text">
+            <span>{{ appUpdateStatusMessage }}</span>
+            <span v-if="appUpdateProgressDetail">{{ appUpdateProgressDetail }}</span>
+          </div>
+          <div class="app-update-dialog__progress-track" aria-hidden="true">
+            <div
+              class="app-update-dialog__progress-fill"
+              :class="{ 'app-update-dialog__progress-fill--indeterminate': appUpdateProgressRatio === null }"
+              :style="appUpdateProgressRatio === null ? undefined : { transform: `scaleX(${appUpdateProgressRatio})` }"
+            ></div>
+          </div>
+        </div>
+        <p v-if="appUpdateActionError" class="app-update-dialog__error">{{ appUpdateActionError }}</p>
         <div class="app-update-dialog__actions">
-          <button class="app-update-dialog__button app-update-dialog__button--ghost" type="button" @click="ignoreCurrentAppUpdate">
+          <button
+            class="app-update-dialog__button app-update-dialog__button--ghost"
+            type="button"
+            :disabled="appUpdateIsBusy"
+            @click="ignoreCurrentAppUpdate"
+          >
             忽略此版本
           </button>
-          <button class="app-update-dialog__button app-update-dialog__button--ghost" type="button" @click="postponeAppUpdate">
+          <button
+            class="app-update-dialog__button app-update-dialog__button--ghost"
+            type="button"
+            :disabled="appUpdateIsBusy"
+            @click="postponeAppUpdate"
+          >
             稍后
           </button>
-          <button class="app-update-dialog__button" type="button" @click="handleOpenUpdateReleasePage">
-            下载更新
+          <button
+            class="app-update-dialog__button"
+            type="button"
+            :disabled="appUpdateIsBusy"
+            @click="handleStartAppUpdateDownload"
+          >
+            {{ appUpdatePrimaryActionLabel }}
           </button>
         </div>
       </div>
@@ -495,6 +527,54 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
+.app-update-dialog__progress-block,
+.app-update-dialog__error {
+  margin: 0;
+}
+
+.app-update-dialog__progress-block {
+  display: grid;
+  gap: 8px;
+}
+
+.app-update-dialog__progress-text {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(73, 69, 79, 0.82);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.app-update-dialog__progress-track {
+  overflow: hidden;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(79, 55, 138, 0.12);
+}
+
+.app-update-dialog__progress-fill {
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, #ff8f2f, #4f378a);
+}
+
+.app-update-dialog__progress-fill--indeterminate {
+  width: 42%;
+  transform: translateX(-100%);
+  animation: app-update-progress-indeterminate 1.1s ease-in-out infinite;
+}
+
+.app-update-dialog__error {
+  color: #b3261e;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
 .app-update-dialog__button {
   display: inline-flex;
   align-items: center;
@@ -509,6 +589,11 @@ onBeforeUnmount(() => {
   font-size: 0.82rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.app-update-dialog__button:disabled {
+  opacity: 0.72;
+  cursor: default;
 }
 
 .app-update-dialog__button--ghost {
@@ -535,5 +620,15 @@ onBeforeUnmount(() => {
 .app-update-dialog-leave-to .app-update-dialog__card {
   opacity: 0;
   transform: translateY(12px) scale(0.98);
+}
+
+@keyframes app-update-progress-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(260%);
+  }
 }
 </style>
