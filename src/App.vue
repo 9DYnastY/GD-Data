@@ -17,6 +17,7 @@ import {
   ignoreCurrentAppUpdate,
   postponeAppUpdate,
   startAppUpdateDownload,
+  syncNativeAppUpdateState,
 } from './lib/app-update'
 
 const MAIN_ROUTE_ORDER: Record<string, number> = {
@@ -38,6 +39,7 @@ const backgroundVideoReady = ref(false)
 const routeTransitionName = ref('')
 
 let backButtonListener: { remove: () => Promise<void> } | null = null
+let appStateChangeListener: { remove: () => Promise<void> } | null = null
 let exitToastTimer: ReturnType<typeof setTimeout> | null = null
 let lastExitAttemptAt = 0
 
@@ -228,8 +230,19 @@ async function attachAndroidBackButtonListener() {
   })
 }
 
+async function attachAppStateChangeListener() {
+  appStateChangeListener = await App.addListener('appStateChange', ({ isActive }) => {
+    if (!isActive) {
+      return
+    }
+
+    void syncNativeAppUpdateState()
+  })
+}
+
 onMounted(() => {
   void attachAndroidBackButtonListener()
+  void attachAppStateChangeListener()
   void checkForAppUpdate('auto').catch(() => {
     // Automatic update checks should not interrupt normal startup.
   })
@@ -264,6 +277,8 @@ onBeforeUnmount(() => {
   clearExitToast()
   void backButtonListener?.remove()
   backButtonListener = null
+  void appStateChangeListener?.remove()
+  appStateChangeListener = null
 })
 </script>
 
@@ -477,7 +492,9 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 12px;
   width: min(100%, 352px);
+  max-width: 352px;
   padding: 20px;
+  box-sizing: border-box;
   border: 1px solid rgba(79, 55, 138, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.96);
@@ -511,6 +528,7 @@ onBeforeUnmount(() => {
   color: rgba(73, 69, 79, 0.82);
   font-size: 0.92rem;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .app-update-dialog__notes {
@@ -538,13 +556,12 @@ onBeforeUnmount(() => {
 }
 
 .app-update-dialog__progress-text {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  gap: 4px;
   color: rgba(73, 69, 79, 0.82);
   font-size: 0.84rem;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .app-update-dialog__progress-track {
@@ -573,6 +590,7 @@ onBeforeUnmount(() => {
   color: #b3261e;
   font-size: 0.84rem;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .app-update-dialog__button {
@@ -589,6 +607,8 @@ onBeforeUnmount(() => {
   font-size: 0.82rem;
   font-weight: 700;
   cursor: pointer;
+  white-space: normal;
+  text-align: center;
 }
 
 .app-update-dialog__button:disabled {

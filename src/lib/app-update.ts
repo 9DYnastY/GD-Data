@@ -1,17 +1,43 @@
 import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { computed, ref } from 'vue'
+import {
+  getNativeAppUpdateState,
+  isNativeAppUpdateSupported,
+  startNativeAppUpdate,
+  type NativeAppUpdateState,
+} from './native-app-update'
 
 const UPDATE_MANIFEST_URL = 'https://gitadora.selundine.top/releases/android/latest/update.json'
 const FALLBACK_VERSION_NAME = '1.1.0'
 const FALLBACK_VERSION_CODE = 2
 const UPDATE_FETCH_TIMEOUT_MS = 10000
-const UPDATE_CONNECT_TIMEOUT_MS = 15000
-const UPDATE_READ_TIMEOUT_MS = 10 * 60 * 1000
-const UPDATE_DOWNLOAD_DIRECTORY = 'updates'
 const AUTO_PROMPT_INTERVAL_MS = 24 * 60 * 60 * 1000
 const LAST_PROMPT_STORAGE_KEY = 'gddata:update:last-prompt'
 const IGNORED_UPDATE_STORAGE_KEY = 'gddata:update:ignored-version'
+const UPDATE_DOWNLOAD_DIRECTORY = 'updates'
+const UPDATE_DOWNLOAD_TIMEOUT_MS = 120000
+const UPDATE_DOWNLOAD_CONNECT_TIMEOUT_MS = 30000
+
+const TEXT_DOWNLOADING = '\u6b63\u5728\u4e0b\u8f7d...'
+const TEXT_OPENING_INSTALLER = '\u6b63\u5728\u6253\u5f00\u5b89\u88c5\u754c\u9762...'
+const TEXT_ENABLE_INSTALL_PERMISSION = '\u5f00\u542f\u5b89\u88c5\u6743\u9650'
+const TEXT_INSTALL_UPDATE = '\u5b89\u88c5\u66f4\u65b0'
+const TEXT_RETRY_DOWNLOAD = '\u91cd\u65b0\u4e0b\u8f7d\u66f4\u65b0'
+const TEXT_DOWNLOAD_AND_INSTALL = '\u4e0b\u8f7d\u5e76\u5b89\u88c5'
+const TEXT_STATUS_OPENING = '\u5b89\u88c5\u5305\u5df2\u5c31\u7eea\uff0c\u6b63\u5728\u6253\u5f00\u7cfb\u7edf\u5b89\u88c5\u754c\u9762\u3002'
+const TEXT_STATUS_PERMISSION = '\u9700\u8981\u5148\u5141\u8bb8 GD Data \u5b89\u88c5\u672a\u77e5\u6765\u6e90\u5e94\u7528\u3002\u8fd4\u56de\u540e\u4f1a\u7ee7\u7eed\u6253\u5f00\u5b89\u88c5\u754c\u9762\u3002'
+const TEXT_STATUS_DOWNLOADED = '\u5b89\u88c5\u5305\u5df2\u4e0b\u8f7d\u5b8c\u6210\uff0c\u53ef\u4ee5\u76f4\u63a5\u5f00\u59cb\u5b89\u88c5\u3002'
+const TEXT_STATUS_DOWNLOADING = '\u6b63\u5728\u4e0b\u8f7d\u66f4\u65b0'
+const TEXT_PROCESSED = '\u5df2\u5904\u7406'
+const TEXT_INVALID_MANIFEST = '\u66f4\u65b0\u4fe1\u606f\u683c\u5f0f\u4e0d\u6b63\u786e\u3002'
+const TEXT_INVALID_PLATFORM = '\u66f4\u65b0\u4fe1\u606f\u5e73\u53f0\u4e0d\u5339\u914d\u3002'
+const TEXT_MISSING_FIELDS = '\u66f4\u65b0\u4fe1\u606f\u7f3a\u5c11\u5fc5\u8981\u5b57\u6bb5\u3002'
+const TEXT_FETCH_TIMEOUT = '\u66f4\u65b0\u68c0\u67e5\u8d85\u65f6\u3002'
+const TEXT_INVALID_FILE_PATH = '\u66f4\u65b0\u5305\u8def\u5f84\u65e0\u6548\uff0c\u8bf7\u91cd\u65b0\u4e0b\u8f7d\u3002'
+const TEXT_INVALID_PACKAGE = '\u66f4\u65b0\u5305\u6821\u9a8c\u5931\u8d25\uff0c\u8bf7\u91cd\u65b0\u4e0b\u8f7d\u3002'
+const TEXT_DOWNLOAD_FAILED = '\u4e0b\u8f7d\u66f4\u65b0\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002'
+const TEXT_GENERIC_ERROR = '\u66f4\u65b0\u5305\u5904\u7406\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002'
 
 export interface AppUpdateManifest {
   platform: 'android'
@@ -20,6 +46,8 @@ export interface AppUpdateManifest {
   publishedAt: string
   releasePageUrl: string
   apkUrl: string
+  apkSize?: number | null
+  apkSha256?: string
   notes: string[]
 }
 
@@ -34,11 +62,33 @@ export interface AvailableAppUpdate {
 }
 
 type UpdateCheckMode = 'auto' | 'manual'
-type AppUpdateDownloadState = 'idle' | 'downloading' | 'opening'
+type AppUpdateDownloadState = 'idle' | 'downloading' | 'downloaded' | 'permission' | 'opening'
+type AppUpdateActionErrorKind =
+  | 'none'
+  | 'download_error'
+  | 'installer_path_error'
+  | 'apk_validation_error'
+  | 'permission_required'
+  | 'unknown_error'
+type ResolvedAppUpdateActionErrorKind = Exclude<AppUpdateActionErrorKind, 'none'>
 
 interface LastPromptRecord {
   versionId: string
   promptedAt: number
+}
+
+interface UpdateFilePaths {
+  finalPath: string
+  finalUri: string
+}
+
+interface AppUpdateActionErrorInfo {
+  kind: ResolvedAppUpdateActionErrorKind
+  message: string
+}
+
+interface AppUpdateError extends Error {
+  appUpdateErrorKind: ResolvedAppUpdateActionErrorKind
 }
 
 export const appUpdateDialogVisible = ref(false)
@@ -46,9 +96,12 @@ export const availableAppUpdate = ref<AvailableAppUpdate | null>(null)
 export const appUpdateDownloadState = ref<AppUpdateDownloadState>('idle')
 export const appUpdateDownloadBytes = ref(0)
 export const appUpdateDownloadTotalBytes = ref<number | null>(null)
+export const appUpdateActionErrorKind = ref<AppUpdateActionErrorKind>('none')
 export const appUpdateActionError = ref('')
 
-export const appUpdateIsBusy = computed(() => appUpdateDownloadState.value !== 'idle')
+export const appUpdateIsBusy = computed(() => (
+  appUpdateDownloadState.value === 'downloading' || appUpdateDownloadState.value === 'opening'
+))
 export const appUpdateProgressPercent = computed(() => {
   const totalBytes = appUpdateDownloadTotalBytes.value
 
@@ -65,28 +118,44 @@ export const appUpdateProgressRatio = computed(() => {
 export const appUpdatePrimaryActionLabel = computed(() => {
   if (appUpdateDownloadState.value === 'downloading') {
     const percent = appUpdateProgressPercent.value
-    return percent === null ? '正在下载...' : `下载中 ${percent}%`
+    return percent === null ? TEXT_DOWNLOADING : `\u4e0b\u8f7d\u4e2d ${percent}%`
   }
 
   if (appUpdateDownloadState.value === 'opening') {
-    return '正在打开安装包...'
+    return TEXT_OPENING_INSTALLER
   }
 
-  return '下载并安装'
+  if (appUpdateDownloadState.value === 'permission') {
+    return TEXT_ENABLE_INSTALL_PERMISSION
+  }
+
+  if (appUpdateDownloadState.value === 'downloaded') {
+    return TEXT_INSTALL_UPDATE
+  }
+
+  return appUpdateActionError.value ? TEXT_RETRY_DOWNLOAD : TEXT_DOWNLOAD_AND_INSTALL
 })
 export const appUpdateStatusMessage = computed(() => {
   if (appUpdateDownloadState.value === 'opening') {
-    return '下载完成，正在打开安装包...'
+    return TEXT_STATUS_OPENING
+  }
+
+  if (appUpdateDownloadState.value === 'permission') {
+    return TEXT_STATUS_PERMISSION
+  }
+
+  if (appUpdateDownloadState.value === 'downloaded') {
+    return TEXT_STATUS_DOWNLOADED
   }
 
   if (appUpdateDownloadState.value === 'downloading') {
-    return '正在下载更新'
+    return TEXT_STATUS_DOWNLOADING
   }
 
   return ''
 })
 export const appUpdateProgressDetail = computed(() => {
-  if (appUpdateDownloadState.value === 'idle') {
+  if (appUpdateDownloadState.value === 'idle' || appUpdateDownloadState.value === 'opening') {
     return ''
   }
 
@@ -98,7 +167,7 @@ export const appUpdateProgressDetail = computed(() => {
   }
 
   if (bytes > 0) {
-    return `已下载 ${formatBytes(bytes)}`
+    return `${TEXT_PROCESSED} ${formatBytes(bytes)}`
   }
 
   return ''
@@ -122,6 +191,19 @@ function getStorage() {
   }
 }
 
+function parseNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  return null
+}
+
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return '0 B'
@@ -138,6 +220,47 @@ function formatBytes(bytes: number) {
 
   const fractionDigits = value >= 10 || unitIndex === 0 ? 0 : 1
   return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
+}
+
+function clearAppUpdateActionError(kind: AppUpdateActionErrorKind = 'none') {
+  appUpdateActionErrorKind.value = kind
+  appUpdateActionError.value = ''
+}
+
+function applyAppUpdateActionError(errorInfo: AppUpdateActionErrorInfo | null) {
+  if (!errorInfo) {
+    clearAppUpdateActionError()
+    return
+  }
+
+  appUpdateActionErrorKind.value = errorInfo.kind
+  appUpdateActionError.value = errorInfo.message
+}
+
+function createAppUpdateError(kind: ResolvedAppUpdateActionErrorKind, message: string): AppUpdateError {
+  const error = new Error(message) as AppUpdateError
+  error.name = 'AppUpdateError'
+  error.appUpdateErrorKind = kind
+  return error
+}
+
+function isAppUpdateError(error: unknown): error is AppUpdateError {
+  return (
+    error instanceof Error &&
+    'appUpdateErrorKind' in error &&
+    typeof (error as Record<string, unknown>).appUpdateErrorKind === 'string'
+  )
+}
+
+function isDirectoryAlreadyExistsError(error: unknown) {
+  return (
+    error instanceof Error &&
+    (
+      error.message.includes('already exists') ||
+      error.message.includes('cannot be overwritten') ||
+      error.message.includes('OS-PLUG-FILE-0010')
+    )
+  )
 }
 
 function readLastPromptRecord(): LastPromptRecord | null {
@@ -218,19 +341,6 @@ function shouldSuppressAutoPrompt(update: AvailableAppUpdate) {
   return Date.now() - lastPrompt.promptedAt < AUTO_PROMPT_INTERVAL_MS
 }
 
-function parseNumber(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value
-  }
-
-  if (typeof value === 'string') {
-    const parsed = Number.parseInt(value, 10)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-
-  return null
-}
-
 function readString(payload: Record<string, unknown>, key: string) {
   const value = payload[key]
   return typeof value === 'string' ? value.trim() : ''
@@ -246,7 +356,7 @@ function normalizeNotes(value: unknown) {
 
 function parseUpdateManifest(value: unknown): AppUpdateManifest {
   if (!isRecord(value)) {
-    throw new Error('更新信息格式不正确')
+    throw new Error(TEXT_INVALID_MANIFEST)
   }
 
   const platform = readString(value, 'platform')
@@ -255,14 +365,16 @@ function parseUpdateManifest(value: unknown): AppUpdateManifest {
   const publishedAt = readString(value, 'publishedAt')
   const releasePageUrl = readString(value, 'releasePageUrl')
   const apkUrl = readString(value, 'apkUrl')
+  const apkSize = parseNumber(value.apkSize)
+  const apkSha256 = readString(value, 'apkSha256').toLowerCase()
   const notes = normalizeNotes(value.notes)
 
   if (platform !== 'android') {
-    throw new Error('更新信息平台不匹配')
+    throw new Error(TEXT_INVALID_PLATFORM)
   }
 
   if (!versionName || versionCode === null || !releasePageUrl || !apkUrl) {
-    throw new Error('更新信息缺少必要字段')
+    throw new Error(TEXT_MISSING_FIELDS)
   }
 
   return {
@@ -272,6 +384,8 @@ function parseUpdateManifest(value: unknown): AppUpdateManifest {
     publishedAt,
     releasePageUrl,
     apkUrl,
+    apkSize: apkSize !== null && apkSize > 0 ? apkSize : null,
+    apkSha256: apkSha256 || undefined,
     notes,
   }
 }
@@ -305,7 +419,7 @@ function resetAppUpdateActionState() {
   appUpdateDownloadState.value = 'idle'
   appUpdateDownloadBytes.value = 0
   appUpdateDownloadTotalBytes.value = null
-  appUpdateActionError.value = ''
+  clearAppUpdateActionError()
 }
 
 function buildDownloadedApkFilename(update: AvailableAppUpdate) {
@@ -313,27 +427,15 @@ function buildDownloadedApkFilename(update: AvailableAppUpdate) {
   return `gddata-android-v${safeVersion}.apk`
 }
 
-function normalizeLocalFilePath(path: string) {
-  return path.startsWith('file://') ? path.replace(/^file:\/\//, '') : path
-}
-
-function isDirectoryAlreadyExistsError(error: unknown) {
-  return (
-    error instanceof Error &&
-    (
-      error.message.includes('already exists') ||
-      error.message.includes('OS-PLUG-FILE-0010')
-    )
-  )
-}
-
-async function ensureUpdateDownloadDirectory() {
+async function getUpdateDownloadPaths(update: AvailableAppUpdate): Promise<UpdateFilePaths> {
   const { Directory, Filesystem } = await import('@capacitor/filesystem')
+  const fileName = buildDownloadedApkFilename(update)
+  const finalPath = `${UPDATE_DOWNLOAD_DIRECTORY}/${fileName}`
 
   try {
     await Filesystem.mkdir({
       path: UPDATE_DOWNLOAD_DIRECTORY,
-      directory: Directory.Cache,
+      directory: Directory.External,
       recursive: true,
     })
   } catch (error) {
@@ -341,50 +443,354 @@ async function ensureUpdateDownloadDirectory() {
       throw error
     }
   }
+
+  const finalFileInfo = await Filesystem.getUri({
+    path: finalPath,
+    directory: Directory.External,
+  })
+
+  return {
+    finalPath,
+    finalUri: finalFileInfo.uri,
+  }
 }
 
-async function deleteDownloadedFile(path: string) {
+async function getUpdateTempFilePath(update: AvailableAppUpdate) {
   const { Directory, Filesystem } = await import('@capacitor/filesystem')
+  const fileName = buildDownloadedApkFilename(update)
+  const tempPath = `${UPDATE_DOWNLOAD_DIRECTORY}/${fileName}.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const tempFileInfo = await Filesystem.getUri({
+    path: tempPath,
+    directory: Directory.External,
+  })
+
+  return {
+    tempPath,
+    tempUri: tempFileInfo.uri,
+  }
+}
+
+async function getUpdateFilesystem() {
+  const { Directory, Filesystem } = await import('@capacitor/filesystem')
+  return { Directory, Filesystem }
+}
+
+async function statDownloadedUpdate(path: string) {
+  const { Directory, Filesystem } = await getUpdateFilesystem()
+
+  try {
+    return await Filesystem.stat({
+      path,
+      directory: Directory.External,
+    })
+  } catch {
+    return null
+  }
+}
+
+async function deleteDownloadedUpdate(path: string) {
+  const { Directory, Filesystem } = await getUpdateFilesystem()
 
   try {
     await Filesystem.deleteFile({
       path,
-      directory: Directory.Cache,
+      directory: Directory.External,
     })
   } catch {
-    // Ignore missing files and cleanup failures before a new download attempt.
+    // Best-effort cleanup only.
   }
 }
 
-function extractDownloadErrorMessage(error: unknown) {
+function matchesExpectedApkSize(update: AvailableAppUpdate, size: number) {
+  const expectedSize = update.manifest.apkSize ?? null
+  return !expectedSize || expectedSize <= 0 || size === expectedSize
+}
+
+async function handoffDownloadedUpdateToNativeInstaller(update: AvailableAppUpdate, fileUri: string) {
+  const nativeState = await startNativeAppUpdate({
+    fileUri,
+    versionName: update.manifest.versionName,
+    versionCode: update.manifest.versionCode,
+    apkSize: update.manifest.apkSize ?? null,
+    apkSha256: update.manifest.apkSha256 ?? null,
+  })
+
+  applyNativeAppUpdateState(nativeState)
+  return nativeState
+}
+
+async function tryReuseDownloadedUpdate(update: AvailableAppUpdate) {
+  const downloadPaths = await getUpdateDownloadPaths(update)
+  const existingFile = await statDownloadedUpdate(downloadPaths.finalPath)
+
+  if (!existingFile || existingFile.size <= 0) {
+    return false
+  }
+
+  if (!matchesExpectedApkSize(update, existingFile.size)) {
+    await deleteDownloadedUpdate(downloadPaths.finalPath)
+    return false
+  }
+
+  appUpdateDownloadBytes.value = existingFile.size
+  appUpdateDownloadTotalBytes.value = existingFile.size
+
+  const nativeState = await handoffDownloadedUpdateToNativeInstaller(update, downloadPaths.finalUri)
+
+  if (nativeState.status === 'failed') {
+    await deleteDownloadedUpdate(downloadPaths.finalPath)
+    appUpdateDownloadBytes.value = 0
+    appUpdateDownloadTotalBytes.value = null
+    return false
+  }
+
+  return true
+}
+
+async function downloadUpdatePackage(update: AvailableAppUpdate) {
+  const { FileTransfer } = await import('@capacitor/file-transfer')
+  const downloadPaths = await getUpdateDownloadPaths(update)
+  const tempFile = await getUpdateTempFilePath(update)
+  const { Directory, Filesystem } = await getUpdateFilesystem()
+  let downloadedBytes = 0
+  let contentLength: number | null = update.manifest.apkSize ?? null
+
+  const progressHandle = await FileTransfer.addListener('progress', (progress) => {
+    if (progress.type !== 'download' || progress.url !== update.manifest.apkUrl) {
+      return
+    }
+
+    downloadedBytes = progress.bytes
+    contentLength = progress.lengthComputable && progress.contentLength > 0
+      ? progress.contentLength
+      : contentLength
+
+    appUpdateDownloadBytes.value = Math.max(0, downloadedBytes)
+    appUpdateDownloadTotalBytes.value = contentLength && contentLength > 0 ? contentLength : null
+  })
+
+  try {
+    await FileTransfer.downloadFile({
+      url: update.manifest.apkUrl,
+      path: tempFile.tempUri,
+      progress: true,
+      readTimeout: UPDATE_DOWNLOAD_TIMEOUT_MS,
+      connectTimeout: UPDATE_DOWNLOAD_CONNECT_TIMEOUT_MS,
+    })
+
+    const downloadedTempFile = await statDownloadedUpdate(tempFile.tempPath)
+    if (!downloadedTempFile || downloadedTempFile.size <= 0) {
+      throw createAppUpdateError('apk_validation_error', TEXT_INVALID_PACKAGE)
+    }
+
+    if (!matchesExpectedApkSize(update, downloadedTempFile.size)) {
+      throw createAppUpdateError('apk_validation_error', TEXT_INVALID_PACKAGE)
+    }
+
+    await deleteDownloadedUpdate(downloadPaths.finalPath)
+
+    await Filesystem.rename({
+      from: tempFile.tempPath,
+      to: downloadPaths.finalPath,
+      directory: Directory.External,
+      toDirectory: Directory.External,
+    })
+
+    const finalFile = await statDownloadedUpdate(downloadPaths.finalPath)
+    if (!finalFile || finalFile.size <= 0) {
+      throw createAppUpdateError('apk_validation_error', TEXT_INVALID_PACKAGE)
+    }
+
+    appUpdateDownloadBytes.value = finalFile.size
+    appUpdateDownloadTotalBytes.value = finalFile.size
+
+    return {
+      path: downloadPaths.finalPath,
+      fileUri: downloadPaths.finalUri,
+    }
+  } catch (error) {
+    await deleteDownloadedUpdate(tempFile.tempPath)
+    throw error
+  } finally {
+    await progressHandle.remove()
+  }
+}
+
+function matchesAvailableUpdate(nativeState: NativeAppUpdateState) {
+  const update = availableAppUpdate.value
+  if (!update) {
+    return false
+  }
+
+  if (nativeState.versionCode !== null) {
+    return nativeState.versionCode === update.manifest.versionCode
+  }
+
+  if (nativeState.versionName) {
+    return nativeState.versionName === update.manifest.versionName
+  }
+
+  return nativeState.status === 'idle'
+}
+
+function applyNativeAppUpdateState(nativeState: NativeAppUpdateState) {
+  if (!matchesAvailableUpdate(nativeState)) {
+    return
+  }
+
+  switch (nativeState.status) {
+    case 'downloading':
+      appUpdateDownloadState.value = 'downloading'
+      appUpdateDownloadBytes.value = nativeState.bytesDownloaded
+      appUpdateDownloadTotalBytes.value = nativeState.totalBytes
+      clearAppUpdateActionError()
+      return
+    case 'downloaded':
+      appUpdateDownloadState.value = 'downloaded'
+      appUpdateDownloadBytes.value = nativeState.bytesDownloaded
+      appUpdateDownloadTotalBytes.value = nativeState.totalBytes
+      clearAppUpdateActionError()
+      return
+    case 'permission_required':
+      appUpdateDownloadState.value = 'permission'
+      appUpdateDownloadBytes.value = nativeState.bytesDownloaded
+      appUpdateDownloadTotalBytes.value = nativeState.totalBytes
+      clearAppUpdateActionError('permission_required')
+      return
+    case 'installing':
+      appUpdateDownloadState.value = 'opening'
+      clearAppUpdateActionError()
+      return
+    case 'failed':
+      appUpdateDownloadState.value = 'idle'
+      appUpdateDownloadBytes.value = 0
+      appUpdateDownloadTotalBytes.value = null
+      applyAppUpdateActionError(extractUpdateActionError(nativeState.errorMessage || TEXT_GENERIC_ERROR))
+      return
+    case 'idle':
+    default:
+      if (!appUpdateIsBusy.value) {
+        appUpdateDownloadState.value = 'idle'
+      }
+  }
+}
+
+function classifyAppUpdateActionErrorMessage(message: string): AppUpdateActionErrorInfo {
+  const normalized = message.trim()
+
+  if (!normalized) {
+    return {
+      kind: 'unknown_error',
+      message: TEXT_GENERIC_ERROR,
+    }
+  }
+
+  if (normalized === TEXT_INVALID_PACKAGE || normalized.includes('\u6821\u9a8c\u5931\u8d25')) {
+    return {
+      kind: 'apk_validation_error',
+      message: normalized,
+    }
+  }
+
+  if (normalized === TEXT_INVALID_FILE_PATH || normalized.includes('\u8def\u5f84\u65e0\u6548')) {
+    return {
+      kind: 'installer_path_error',
+      message: normalized,
+    }
+  }
+
+  if (
+    normalized.includes('\u5141\u8bb8') &&
+    normalized.includes('\u5b89\u88c5')
+  ) {
+    return {
+      kind: 'permission_required',
+      message: normalized,
+    }
+  }
+
+  if (
+    normalized.includes('\u4e0b\u8f7d') ||
+    normalized.includes('HTTP') ||
+    normalized.includes('\u8fde\u63a5')
+  ) {
+    return {
+      kind: 'download_error',
+      message: normalized,
+    }
+  }
+
+  return {
+    kind: 'unknown_error',
+    message: normalized,
+  }
+}
+
+function buildFileTransferErrorMessage(error: Record<string, unknown>, fallbackMessage: string) {
+  const code = typeof error.code === 'string' ? error.code.trim() : ''
+  const errorData = isRecord(error.data) ? error.data : null
+  const httpStatus = errorData ? parseNumber(errorData.httpStatus) : null
+  const nativeException = errorData ? readString(errorData, 'exception') : ''
+
+  if (code === 'OS-PLUG-FLTR-0010' && httpStatus !== null) {
+    return `\u4e0b\u8f7d\u66f4\u65b0\u5931\u8d25 (HTTP ${httpStatus})`
+  }
+
+  if (code === 'OS-PLUG-FLTR-0008') {
+    return '\u4e0b\u8f7d\u66f4\u65b0\u5931\u8d25\uff1a\u65e0\u6cd5\u8fde\u63a5\u5230\u670d\u52a1\u5668\u3002'
+  }
+
+  if (code === 'OS-PLUG-FLTR-0006') {
+    return '\u4e0b\u8f7d\u66f4\u65b0\u5931\u8d25\uff1a\u5b58\u50a8\u6743\u9650\u88ab\u62d2\u7edd\u3002'
+  }
+
+  if (nativeException) {
+    return `\u4e0b\u8f7d\u66f4\u65b0\u5931\u8d25\uff1a${nativeException}`
+  }
+
+  if (fallbackMessage) {
+    return fallbackMessage
+  }
+
+  return TEXT_DOWNLOAD_FAILED
+}
+
+function extractUpdateActionError(error: unknown): AppUpdateActionErrorInfo {
+  if (isAppUpdateError(error)) {
+    return {
+      kind: error.appUpdateErrorKind,
+      message: error.message.trim() || TEXT_GENERIC_ERROR,
+    }
+  }
+
+  if (typeof error === 'string') {
+    return classifyAppUpdateActionErrorMessage(error)
+  }
+
   if (isRecord(error)) {
-    const code = typeof error.code === 'string' ? error.code : ''
-    const message = typeof error.message === 'string' ? error.message : ''
-    const data = isRecord(error.data) ? error.data : null
-    const httpStatus = typeof data?.httpStatus === 'number' ? data.httpStatus : null
+    const code = typeof error.code === 'string' ? error.code.trim() : ''
+    const message = typeof error.message === 'string' ? error.message.trim() : ''
 
-    if (code === 'OS-PLUG-FLTR-0010' && httpStatus !== null) {
-      return `安装包下载失败 (${httpStatus})`
-    }
-
-    if (code === 'OS-PLUG-FLVW-0010') {
-      return '系统未找到可打开 APK 的安装程序'
-    }
-
-    if (code === 'OS-PLUG-FLVW-0008') {
-      return '安装包已下载，但系统未能打开它'
+    if (code.startsWith('OS-PLUG-FLTR-')) {
+      return {
+        kind: 'download_error',
+        message: buildFileTransferErrorMessage(error, message),
+      }
     }
 
     if (message) {
-      return message
+      return classifyAppUpdateActionErrorMessage(message)
     }
   }
 
-  if (error instanceof Error && error.message) {
-    return error.message
+  if (error instanceof Error && error.message.trim()) {
+    return classifyAppUpdateActionErrorMessage(error.message)
   }
 
-  return '更新安装包处理失败，请稍后重试'
+  return {
+    kind: 'unknown_error',
+    message: TEXT_GENERIC_ERROR,
+  }
 }
 
 async function fetchUpdateManifest() {
@@ -401,14 +807,14 @@ async function fetchUpdateManifest() {
     })
 
     if (!response.ok) {
-      throw new Error(`更新信息请求失败 (${response.status})`)
+      throw new Error(`\u66f4\u65b0\u4fe1\u606f\u8bf7\u6c42\u5931\u8d25 (${response.status})`)
     }
 
     const payload: unknown = await response.json()
     return parseUpdateManifest(payload)
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('更新检查超时')
+      throw new Error(TEXT_FETCH_TIMEOUT)
     }
 
     throw error
@@ -459,6 +865,25 @@ async function findAvailableUpdate() {
   } satisfies AvailableAppUpdate
 }
 
+export async function syncNativeAppUpdateState() {
+  if (!isNativeAppUpdateSupported() || !availableAppUpdate.value) {
+    return null
+  }
+
+  try {
+    const nativeState = await getNativeAppUpdateState()
+    applyNativeAppUpdateState(nativeState)
+    return nativeState
+  } catch (error) {
+    if (appUpdateDownloadState.value === 'downloading' || appUpdateDownloadState.value === 'opening') {
+      appUpdateDownloadState.value = 'idle'
+      applyAppUpdateActionError(extractUpdateActionError(error))
+    }
+
+    return null
+  }
+}
+
 export function showAppUpdateDialog(update: AvailableAppUpdate, mode: UpdateCheckMode) {
   availableAppUpdate.value = update
   appUpdateDialogVisible.value = true
@@ -467,6 +892,8 @@ export function showAppUpdateDialog(update: AvailableAppUpdate, mode: UpdateChec
   if (mode === 'auto') {
     writeLastPromptRecord(update)
   }
+
+  void syncNativeAppUpdateState()
 }
 
 export async function checkForAppUpdate(mode: UpdateCheckMode) {
@@ -534,97 +961,34 @@ export async function startAppUpdateDownload() {
     return
   }
 
-  appUpdateActionError.value = ''
+  clearAppUpdateActionError()
 
-  if (Capacitor.getPlatform() !== 'android') {
+  if (!isNativeAppUpdateSupported()) {
     window.open(update.manifest.apkUrl || update.manifest.releasePageUrl, '_blank', 'noopener,noreferrer')
     closeAppUpdateDialog()
     return
   }
 
-  let didFinishDownload = false
-  let targetPath = ''
-  let progressHandle: { remove: () => Promise<void> } | null = null
-
   try {
-    const { FileTransfer } = await import('@capacitor/file-transfer')
-    const { FileViewer } = await import('@capacitor/file-viewer')
-    const { Directory, Filesystem } = await import('@capacitor/filesystem')
+    if (await tryReuseDownloadedUpdate(update)) {
+      return
+    }
 
-    targetPath = `${UPDATE_DOWNLOAD_DIRECTORY}/${buildDownloadedApkFilename(update)}`
+    clearAppUpdateActionError()
     appUpdateDownloadState.value = 'downloading'
     appUpdateDownloadBytes.value = 0
-    appUpdateDownloadTotalBytes.value = null
+    appUpdateDownloadTotalBytes.value = update.manifest.apkSize ?? null
 
-    await ensureUpdateDownloadDirectory()
-    await deleteDownloadedFile(targetPath)
+    const downloadedPackage = await downloadUpdatePackage(update)
+    const nativeState = await handoffDownloadedUpdateToNativeInstaller(update, downloadedPackage.fileUri)
 
-    const targetUri = await Filesystem.getUri({
-      path: targetPath,
-      directory: Directory.Cache,
-    })
-
-    progressHandle = await FileTransfer.addListener('progress', (progress) => {
-      if (progress.type !== 'download' || progress.url !== update.manifest.apkUrl) {
-        return
-      }
-
-      appUpdateDownloadState.value = 'downloading'
-      appUpdateDownloadBytes.value = progress.bytes
-      appUpdateDownloadTotalBytes.value = progress.lengthComputable && progress.contentLength > 0
-        ? progress.contentLength
-        : null
-    })
-
-    await FileTransfer.downloadFile({
-      url: update.manifest.apkUrl,
-      path: targetUri.uri,
-      progress: true,
-      connectTimeout: UPDATE_CONNECT_TIMEOUT_MS,
-      readTimeout: UPDATE_READ_TIMEOUT_MS,
-    })
-
-    const downloadedFile = await Filesystem.stat({
-      path: targetPath,
-      directory: Directory.Cache,
-    })
-
-    if (downloadedFile.size <= 0) {
-      throw new Error('安装包下载失败，请重试')
+    if (nativeState.status === 'failed') {
+      await deleteDownloadedUpdate(downloadedPackage.path)
     }
-
-    if (
-      appUpdateDownloadTotalBytes.value &&
-      appUpdateDownloadTotalBytes.value > 0 &&
-      downloadedFile.size < appUpdateDownloadTotalBytes.value
-    ) {
-      throw new Error('安装包下载不完整，请重试')
-    }
-
-    didFinishDownload = true
-    appUpdateDownloadBytes.value = downloadedFile.size
-    appUpdateDownloadTotalBytes.value = appUpdateDownloadTotalBytes.value ?? downloadedFile.size
-    appUpdateDownloadState.value = 'opening'
-
-    const localFile = await Filesystem.getUri({
-      path: targetPath,
-      directory: Directory.Cache,
-    })
-
-    await FileViewer.openDocumentFromLocalPath({
-      path: normalizeLocalFilePath(localFile.uri),
-    })
-
-    appUpdateDialogVisible.value = false
-    resetAppUpdateActionState()
   } catch (error) {
-    if (!didFinishDownload && targetPath) {
-      await deleteDownloadedFile(targetPath)
-    }
-
     appUpdateDownloadState.value = 'idle'
-    appUpdateActionError.value = extractDownloadErrorMessage(error)
-  } finally {
-    await progressHandle?.remove().catch(() => {})
+    appUpdateDownloadBytes.value = 0
+    appUpdateDownloadTotalBytes.value = null
+    applyAppUpdateActionError(extractUpdateActionError(error))
   }
 }
