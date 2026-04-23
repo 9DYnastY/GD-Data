@@ -68,11 +68,20 @@ function getMainRouteInner(element: Element) {
   return element.querySelector<HTMLElement>('.home-view__inner, .skill-view__inner')
 }
 
-function getMainRouteDirection() {
-  return routeTransitionName.value === 'main-route-back' ? -1 : 1
+function getMainRouteTopShell(element: Element) {
+  return element.querySelector<HTMLElement>('.top-shell')
 }
 
-function resetRouteTransitionStyles(root: HTMLElement, inner: HTMLElement | null) {
+function getMainRouteTopShellSurface(element: Element) {
+  return element.querySelector<HTMLElement>('.top-shell__purple')
+}
+
+function resetRouteTransitionStyles(
+  root: HTMLElement,
+  inner: HTMLElement | null,
+  topShell: HTMLElement | null,
+  topShellSurface: HTMLElement | null,
+) {
   root.style.position = ''
   root.style.inset = ''
   root.style.width = ''
@@ -83,9 +92,21 @@ function resetRouteTransitionStyles(root: HTMLElement, inner: HTMLElement | null
   }
 
   inner.style.transition = ''
-  inner.style.transform = ''
   inner.style.opacity = ''
   inner.style.willChange = ''
+
+  if (!topShell) {
+    return
+  }
+
+  topShell.style.transition = ''
+  topShell.style.pointerEvents = ''
+
+  if (!topShellSurface) {
+    return
+  }
+
+  topShellSurface.style.boxShadow = ''
 }
 
 function finishAfterMainRouteAnimation(callback: () => void) {
@@ -104,9 +125,8 @@ function handleMainRouteBeforeEnter(element: Element) {
   }
 
   inner.style.transition = 'none'
-  inner.style.transform = `translateX(${getMainRouteDirection() * 100}%)`
-  inner.style.opacity = '0.98'
-  inner.style.willChange = 'transform, opacity'
+  inner.style.opacity = '0'
+  inner.style.willChange = 'opacity'
 }
 
 function handleMainRouteEnter(element: Element, done: () => void) {
@@ -117,6 +137,8 @@ function handleMainRouteEnter(element: Element, done: () => void) {
 
   const root = element as HTMLElement
   const inner = getMainRouteInner(element)
+  const topShell = getMainRouteTopShell(element)
+  const topShellSurface = getMainRouteTopShellSurface(element)
 
   if (!inner) {
     done()
@@ -124,13 +146,12 @@ function handleMainRouteEnter(element: Element, done: () => void) {
   }
 
   requestAnimationFrame(() => {
-    inner.style.transition = `transform ${MAIN_ROUTE_TRANSITION_MS}ms ${MAIN_ROUTE_EASING}, opacity 240ms ease`
-    inner.style.transform = 'translateX(0)'
+    inner.style.transition = `opacity ${MAIN_ROUTE_TRANSITION_MS}ms ${MAIN_ROUTE_EASING}`
     inner.style.opacity = '1'
   })
 
   finishAfterMainRouteAnimation(() => {
-    resetRouteTransitionStyles(root, inner)
+    resetRouteTransitionStyles(root, inner, topShell, topShellSurface)
     done()
   })
 }
@@ -143,6 +164,8 @@ function handleMainRouteLeave(element: Element, done: () => void) {
 
   const root = element as HTMLElement
   const inner = getMainRouteInner(element)
+  const topShell = getMainRouteTopShell(element)
+  const topShellSurface = getMainRouteTopShellSurface(element)
 
   root.style.position = 'absolute'
   root.style.inset = '0'
@@ -154,15 +177,23 @@ function handleMainRouteLeave(element: Element, done: () => void) {
     return
   }
 
+  if (topShell) {
+    topShell.style.transition = 'none'
+    topShell.style.pointerEvents = 'none'
+  }
+
+  if (topShellSurface) {
+    topShellSurface.style.boxShadow = 'none'
+  }
+
   requestAnimationFrame(() => {
-    inner.style.transition = `transform ${MAIN_ROUTE_TRANSITION_MS}ms ${MAIN_ROUTE_EASING}, opacity 240ms ease`
-    inner.style.transform = `translateX(${getMainRouteDirection() * -100}%)`
-    inner.style.opacity = '0.86'
-    inner.style.willChange = 'transform, opacity'
+    inner.style.transition = `opacity ${MAIN_ROUTE_TRANSITION_MS}ms ${MAIN_ROUTE_EASING}`
+    inner.style.opacity = '0'
+    inner.style.willChange = 'opacity'
   })
 
   finishAfterMainRouteAnimation(() => {
-    resetRouteTransitionStyles(root, inner)
+    resetRouteTransitionStyles(root, inner, topShell, topShellSurface)
     done()
   })
 }
