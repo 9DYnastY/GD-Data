@@ -19,25 +19,23 @@ const UPDATE_DOWNLOAD_DIRECTORY = 'updates'
 const UPDATE_DOWNLOAD_TIMEOUT_MS = 120000
 const UPDATE_DOWNLOAD_CONNECT_TIMEOUT_MS = 30000
 
-const TEXT_DOWNLOADING = '\u6b63\u5728\u4e0b\u8f7d...'
-const TEXT_OPENING_INSTALLER = '\u6b63\u5728\u6253\u5f00\u5b89\u88c5\u754c\u9762...'
-const TEXT_ENABLE_INSTALL_PERMISSION = '\u5f00\u542f\u5b89\u88c5\u6743\u9650'
-const TEXT_INSTALL_UPDATE = '\u5b89\u88c5\u66f4\u65b0'
-const TEXT_RETRY_DOWNLOAD = '\u91cd\u65b0\u4e0b\u8f7d\u66f4\u65b0'
-const TEXT_DOWNLOAD_AND_INSTALL = '\u4e0b\u8f7d\u5e76\u5b89\u88c5'
-const TEXT_STATUS_OPENING = '\u5b89\u88c5\u5305\u5df2\u5c31\u7eea\uff0c\u6b63\u5728\u6253\u5f00\u7cfb\u7edf\u5b89\u88c5\u754c\u9762\u3002'
-const TEXT_STATUS_PERMISSION = '\u9700\u8981\u5148\u5141\u8bb8 GD Data \u5b89\u88c5\u672a\u77e5\u6765\u6e90\u5e94\u7528\u3002\u8fd4\u56de\u540e\u4f1a\u7ee7\u7eed\u6253\u5f00\u5b89\u88c5\u754c\u9762\u3002'
-const TEXT_STATUS_DOWNLOADED = '\u5b89\u88c5\u5305\u5df2\u4e0b\u8f7d\u5b8c\u6210\uff0c\u53ef\u4ee5\u76f4\u63a5\u5f00\u59cb\u5b89\u88c5\u3002'
-const TEXT_STATUS_DOWNLOADING = '\u6b63\u5728\u4e0b\u8f7d\u66f4\u65b0'
-const TEXT_PROCESSED = '\u5df2\u5904\u7406'
-const TEXT_INVALID_MANIFEST = '\u66f4\u65b0\u4fe1\u606f\u683c\u5f0f\u4e0d\u6b63\u786e\u3002'
-const TEXT_INVALID_PLATFORM = '\u66f4\u65b0\u4fe1\u606f\u5e73\u53f0\u4e0d\u5339\u914d\u3002'
-const TEXT_MISSING_FIELDS = '\u66f4\u65b0\u4fe1\u606f\u7f3a\u5c11\u5fc5\u8981\u5b57\u6bb5\u3002'
-const TEXT_FETCH_TIMEOUT = '\u66f4\u65b0\u68c0\u67e5\u8d85\u65f6\u3002'
-const TEXT_INVALID_FILE_PATH = '\u66f4\u65b0\u5305\u8def\u5f84\u65e0\u6548\uff0c\u8bf7\u91cd\u65b0\u4e0b\u8f7d\u3002'
-const TEXT_INVALID_PACKAGE = '\u66f4\u65b0\u5305\u6821\u9a8c\u5931\u8d25\uff0c\u8bf7\u91cd\u65b0\u4e0b\u8f7d\u3002'
-const TEXT_DOWNLOAD_FAILED = '\u4e0b\u8f7d\u66f4\u65b0\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002'
-const TEXT_GENERIC_ERROR = '\u66f4\u65b0\u5305\u5904\u7406\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002'
+const TEXT_DOWNLOADING = '正在下载...'
+const TEXT_OPENING_INSTALLER = '正在打开安装界面...'
+const TEXT_ENABLE_INSTALL_PERMISSION = '开启安装权限'
+const TEXT_INSTALL_UPDATE = '安装更新'
+const TEXT_RETRY_DOWNLOAD = '重新下载更新'
+const TEXT_DOWNLOAD_AND_INSTALL = '下载并安装'
+const TEXT_STATUS_PERMISSION = '需要先允许 GD Data 安装未知来源应用。返回后会继续打开安装界面。'
+const TEXT_STATUS_DOWNLOADING = '正在下载更新'
+const TEXT_PROCESSED = '已处理'
+const TEXT_INVALID_MANIFEST = '更新信息格式不正确。'
+const TEXT_INVALID_PLATFORM = '更新信息平台不匹配。'
+const TEXT_MISSING_FIELDS = '更新信息缺少必要字段。'
+const TEXT_FETCH_TIMEOUT = '更新检查超时。'
+const TEXT_INVALID_FILE_PATH = '更新包路径无效，请重新下载。'
+const TEXT_INVALID_PACKAGE = '更新包校验失败，请重新下载。'
+const TEXT_DOWNLOAD_FAILED = '下载更新失败，请稍后重试。'
+const TEXT_GENERIC_ERROR = '更新包处理失败，请稍后重试。'
 
 export interface AppUpdateManifest {
   platform: 'android'
@@ -136,17 +134,11 @@ export const appUpdatePrimaryActionLabel = computed(() => {
   return appUpdateActionError.value ? TEXT_RETRY_DOWNLOAD : TEXT_DOWNLOAD_AND_INSTALL
 })
 export const appUpdateStatusMessage = computed(() => {
-  if (appUpdateDownloadState.value === 'opening') {
-    return TEXT_STATUS_OPENING
-  }
 
   if (appUpdateDownloadState.value === 'permission') {
     return TEXT_STATUS_PERMISSION
   }
 
-  if (appUpdateDownloadState.value === 'downloaded') {
-    return TEXT_STATUS_DOWNLOADED
-  }
 
   if (appUpdateDownloadState.value === 'downloading') {
     return TEXT_STATUS_DOWNLOADING

@@ -339,9 +339,6 @@ onBeforeUnmount(() => {
     >
       <div class="app-update-dialog__card">
         <h2 id="app-update-dialog-title">发现新版本 v{{ availableAppUpdate.manifest.versionName }}</h2>
-        <p class="app-update-dialog__summary">
-          当前版本 v{{ availableAppUpdate.current.versionName }}，下载完成后会自动打开安装包。
-        </p>
         <ul v-if="availableAppUpdate.manifest.notes.length" class="app-update-dialog__notes">
           <li v-for="note in availableAppUpdate.manifest.notes" :key="note">{{ note }}</li>
         </ul>

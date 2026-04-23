@@ -163,6 +163,8 @@ const levelValueParts = computed(() => splitValueText(props.row.difficultyText))
 const titleStyle = computed(() => ({
   left: `${TITLE_BASE_LEFT + titleVisualOffset.value}px`,
 }))
+const coverLoaded = ref(false)
+const coverFailed = ref(false)
 
 function getTitleMeasureContext() {
   if (titleMeasureContext) {
@@ -260,6 +262,11 @@ watch(title, async () => {
   fitTitleText()
 }, { immediate: true })
 
+watch(coverSrc, () => {
+  coverLoaded.value = false
+  coverFailed.value = false
+}, { immediate: true })
+
 onMounted(async () => {
   await nextTick()
   fitTitleText()
@@ -300,13 +307,22 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div class="b50-score-card__cover-shell">
+    <div
+      class="b50-score-card__cover-shell"
+      :class="{
+        'b50-score-card__cover-shell--loading': Boolean(coverSrc) && !coverLoaded && !coverFailed,
+        'b50-score-card__cover-shell--fallback': !coverSrc || coverFailed,
+      }"
+    >
       <img
-        v-if="coverSrc"
+        v-if="coverSrc && !coverFailed"
         class="b50-score-card__cover-image"
+        :class="{ 'b50-score-card__cover-image--loaded': coverLoaded }"
         :src="coverSrc"
         :alt="`${title} cover`"
         decoding="async"
+        @load="coverLoaded = true"
+        @error="coverFailed = true"
       />
       <span v-else class="b50-score-card__cover-fallback">{{ coverFallback }}</span>
     </div>
@@ -441,19 +457,59 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border: 1px solid #262527;
   border-radius: 0;
+  background: #d9d6de;
+}
+
+.b50-score-card__cover-shell--loading::before {
+  content: '';
+  position: absolute;
+  inset: -35% -70%;
+  z-index: 1;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.6) 50%,
+    transparent 62%
+  );
+  background-repeat: no-repeat;
+  animation: b50CoverSkeletonSweep 1.25s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.b50-score-card__cover-shell--loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    linear-gradient(135deg, #d7d3dc 0%, #eeeaf2 45%, #cbc6d1 100%),
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.28), transparent 24%),
+    radial-gradient(circle at 76% 78%, rgba(124, 113, 145, 0.13), transparent 28%);
+}
+
+.b50-score-card__cover-shell--fallback {
   background:
     linear-gradient(180deg, rgba(18, 14, 33, 0.94), rgba(37, 26, 69, 0.94)),
     linear-gradient(160deg, #161122, #31285d);
 }
 
 .b50-score-card__cover-image {
+  position: relative;
+  z-index: 2;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+
+.b50-score-card__cover-image--loaded {
+  opacity: 1;
 }
 
 .b50-score-card__cover-fallback {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -465,6 +521,16 @@ onBeforeUnmount(() => {
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: lowercase;
+}
+
+@keyframes b50CoverSkeletonSweep {
+  from {
+    transform: translate3d(-34%, -18%, 0);
+  }
+
+  to {
+    transform: translate3d(34%, 18%, 0);
+  }
 }
 
 .b50-score-card__title {

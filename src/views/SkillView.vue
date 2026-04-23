@@ -38,6 +38,7 @@ import type { SongViewModel } from '../types/song'
 
 const SCORE_PAGE_SIZE = 50
 const AUTH_RETRY_DELAYS_MS = [400, 900]
+const PROFILE_AVATAR_GUIDE_STORAGE_KEY = 'gddata:skill-profile-avatar-guide-shown'
 type SkillMenu = 'hot' | 'filter' | 'sort' | null
 const router = useRouter()
 const FAMILY_LABELS: Record<BjmaniaScoreFamily, string> = { dm: 'DM', gf: 'GF' }
@@ -88,6 +89,7 @@ const b50ExportShellRef = ref<HTMLElement | null>(null)
 const b50ExportRow = ref<BjmaniaScoreListItem | null>(null)
 const b50ExportCoverSrc = ref<string | null>(null)
 const generatingB50 = ref(false)
+const showAvatarGuide = ref(false)
 
 const isNativeRuntime = computed(() => isNativeBjmaniaHttp())
 const isAuthenticated = computed(() => authUser.value !== null)
@@ -178,6 +180,65 @@ function hasLocalSessionState() {
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+function hasSeenAvatarGuide() {
+  if (typeof window === 'undefined') {
+    return true
+  }
+
+  try {
+    return window.localStorage.getItem(PROFILE_AVATAR_GUIDE_STORAGE_KEY) === '1'
+  } catch {
+    return true
+  }
+}
+
+function markAvatarGuideSeen() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(PROFILE_AVATAR_GUIDE_STORAGE_KEY, '1')
+  } catch {
+    // Ignore localStorage failures; the guide is non-critical UI.
+  }
+}
+
+function openAvatarGuide(options?: { persist?: boolean }) {
+  showFilters.value = false
+  openMenu.value = null
+  showProfilePanel.value = false
+  showAvatarGuide.value = true
+
+  if (options?.persist) {
+    markAvatarGuideSeen()
+  }
+}
+
+function requestAvatarGuideOnce() {
+  if (!isAuthenticated.value || hasSeenAvatarGuide()) {
+    return
+  }
+
+  openAvatarGuide({ persist: true })
+}
+
+function dismissAvatarGuide() {
+  showAvatarGuide.value = false
+}
+
+function handleAvatarGuideHotspotClick() {
+  dismissAvatarGuide()
+
+  if (!isAuthenticated.value) {
+    return
+  }
+
+  showFilters.value = false
+  openMenu.value = null
+  showProfilePanel.value = true
 }
 
 async function runWithUnauthorizedRetry<T>(loader: () => Promise<T>) {
@@ -313,6 +374,7 @@ async function handleSignOut() {
   dataError.value = ''
   loginError.value = ''
   showProfilePanel.value = false
+  showAvatarGuide.value = false
 }
 
 function loadMoreScores() {
@@ -360,6 +422,10 @@ function selectScoreFilter(value: BjmaniaScoreFilterKey) { selectedScoreFilter.v
 function selectScoreSort(value: BjmaniaScoreSortKey) { selectedScoreSort.value = value; openMenu.value = null }
 function submitSearch() { closeFilters(); searchInputRef.value?.blur() }
 async function handleProfileBadgeClick() {
+  if (showAvatarGuide.value) {
+    dismissAvatarGuide()
+  }
+
   showFilters.value = false
   openMenu.value = null
 
@@ -475,6 +541,21 @@ function handleDocumentPointerDown(event: PointerEvent) {
 watch([selectedFamily, selectedHotFilter, selectedScoreFilter, selectedScoreSort, scoreSearch], () => {
   visibleScoreCount.value = SCORE_PAGE_SIZE
 })
+
+watch(
+  [isAuthenticated, booting],
+  ([authenticated, isBooting]) => {
+    if (!authenticated) {
+      showAvatarGuide.value = false
+      return
+    }
+
+    if (!isBooting) {
+      requestAvatarGuideOnce()
+    }
+  },
+  { flush: 'post' },
+)
 
 watch(
   [visibleScores, hasMoreScores, loadMoreTrigger],
@@ -597,6 +678,21 @@ onBeforeUnmount(() => {
         </div>
       </transition>
     </header>
+
+    <transition name="avatar-guide">
+      <div v-if="showAvatarGuide" class="avatar-guide" role="presentation" @click="dismissAvatarGuide">
+        <div class="avatar-guide__ring" aria-hidden="true"></div>
+        <button
+          class="avatar-guide__hotspot"
+          type="button"
+          aria-label="再次点击头像展开信息面板"
+          @click.stop="handleAvatarGuideHotspotClick"
+        ></button>
+        <div class="avatar-guide__card" @click.stop>
+          <p>再次点击头像可展开信息面板</p>
+        </div>
+      </div>
+    </transition>
 
     <div class="skill-view__inner">
       <section class="skill-list">
@@ -752,6 +848,92 @@ onBeforeUnmount(() => {
   font-family: var(--font-display);
   font-size: 1rem;
   font-weight: 700;
+}
+
+.avatar-guide {
+  --avatar-guide-x: min(calc(100vw - 35px), calc(50vw + 166px));
+  --avatar-guide-y: calc(var(--skill-top-bar-padding) + 24px);
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background:
+    radial-gradient(
+      circle at var(--avatar-guide-x) var(--avatar-guide-y),
+      transparent 0,
+      transparent 38px,
+      rgba(7, 4, 24, 0.78) 40px
+    );
+}
+
+.avatar-guide__ring,
+.avatar-guide__hotspot {
+  position: fixed;
+  left: var(--avatar-guide-x);
+  top: var(--avatar-guide-y);
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.avatar-guide__ring {
+  width: 64px;
+  height: 64px;
+  border: 2px solid rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 0 0 10px rgba(255, 255, 255, 0.08),
+    0 0 28px rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+  animation: avatarGuidePulse 1.6s ease-in-out infinite;
+}
+
+.avatar-guide__hotspot {
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.avatar-guide__card {
+  position: fixed;
+  top: calc(var(--avatar-guide-y) + 58px);
+  right: max(16px, calc((100vw - 402px) / 2 + 11px));
+  width: min(270px, calc(100vw - 32px));
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(72, 49, 132, 0.94);
+  color: #ffffff;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.26);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.avatar-guide__card::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  right: 19px;
+  width: 16px;
+  height: 16px;
+  background: inherit;
+  transform: rotate(45deg);
+}
+
+.avatar-guide__card p {
+  position: relative;
+  margin: 0;
+}
+
+@keyframes avatarGuidePulse {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.08);
+  }
 }
 
 .filter-drawer {
@@ -1143,6 +1325,16 @@ onBeforeUnmount(() => {
 .menu-fade-leave-to {
   opacity: 0;
   transform: translateY(-6px);
+}
+
+.avatar-guide-enter-active,
+.avatar-guide-leave-active {
+  transition: opacity 0.22s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.avatar-guide-enter-from,
+.avatar-guide-leave-to {
+  opacity: 0;
 }
 
 @media (max-width: 720px) {

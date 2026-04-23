@@ -202,7 +202,7 @@ onBeforeUnmount(() => {
         v-else-if="loadedFromCache && filteredRows.length"
         class="recent-history-view__sync"
       >
-        已先显示本地缓存，后台继续刷新
+        使用缓存中，若此条消息长时存在，请尝试重新登录
       </p>
       <p
         v-else-if="error && filteredRows.length"

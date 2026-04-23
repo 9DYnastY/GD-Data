@@ -41,6 +41,7 @@ type SearchFilters = {
 }
 
 const SEARCH_STORAGE_KEY = 'gddata:last-search'
+const INSTRUMENT_GUIDE_STORAGE_KEY = 'gddata:home-instrument-guide-shown'
 const PAGE_SIZE = 20
 const VISIBLE_COVER_PRELOAD_LIMIT = 8
 const SKILL_COVER_PRELOAD_LIMIT_PER_FAMILY = 8
@@ -141,6 +142,7 @@ const searchQuery = ref(
 const sortOption = ref<SearchSortOption>('id-desc')
 const selectedInstrument = ref<InstrumentKey>('drum')
 const selectedCatalogFilter = ref<SongCatalogFilterKey>('current')
+const showInstrumentGuide = ref(false)
 const filters = reactive<SearchFilters>({
   versionOrder: null,
   difficultyMin: FULL_DIFFICULTY_MIN,
@@ -569,6 +571,56 @@ function cycleInstrument() {
   selectedInstrument.value = INSTRUMENT_ORDER[(currentIndex + 1) % INSTRUMENT_ORDER.length]
 }
 
+function hasSeenInstrumentGuide() {
+  if (typeof window === 'undefined') {
+    return true
+  }
+
+  try {
+    return window.localStorage.getItem(INSTRUMENT_GUIDE_STORAGE_KEY) === '1'
+  } catch {
+    return true
+  }
+}
+
+function markInstrumentGuideSeen() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(INSTRUMENT_GUIDE_STORAGE_KEY, '1')
+  } catch {
+    // Ignore localStorage failures; this guide is only a first-run hint.
+  }
+}
+
+function openInstrumentGuide(options?: { persist?: boolean }) {
+  closeFilters()
+  showInstrumentGuide.value = true
+
+  if (options?.persist) {
+    markInstrumentGuideSeen()
+  }
+}
+
+function requestInstrumentGuideOnce() {
+  if (hasSeenInstrumentGuide()) {
+    return
+  }
+
+  openInstrumentGuide({ persist: true })
+}
+
+function dismissInstrumentGuide() {
+  showInstrumentGuide.value = false
+}
+
+function handleInstrumentGuideHotspotClick() {
+  dismissInstrumentGuide()
+  cycleInstrument()
+}
+
 function toggleMenu(menu: Exclude<SearchMenu, null>) {
   openMenu.value = openMenu.value === menu ? null : menu
 }
@@ -624,6 +676,7 @@ onMounted(async () => {
     loading.value = false
     await nextTick()
     setupLoadMoreObserver()
+    requestInstrumentGuideOnce()
   }
 })
 
@@ -842,6 +895,21 @@ function compareMasterDifficulty(
         </section>
       </transition>
     </header>
+
+    <transition name="instrument-guide">
+      <div v-if="showInstrumentGuide" class="instrument-guide" role="presentation" @click="dismissInstrumentGuide">
+        <div class="instrument-guide__ring" aria-hidden="true"></div>
+        <button
+          class="instrument-guide__hotspot"
+          type="button"
+          aria-label="切换展示模式"
+          @click.stop="handleInstrumentGuideHotspotClick"
+        ></button>
+        <div class="instrument-guide__card" @click.stop>
+          <p>可切换展示模式</p>
+        </div>
+      </div>
+    </transition>
 
     <div class="home-view__inner">
       <section v-if="loading" class="state-card">
@@ -1238,6 +1306,93 @@ function compareMasterDifficulty(
   height: 56px;
 }
 
+.instrument-guide {
+  --instrument-guide-x: calc(100vw - 42px);
+  --instrument-guide-y: calc(100vh - env(safe-area-inset-bottom, 0px) - 120px);
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background:
+    radial-gradient(
+      circle at var(--instrument-guide-x) var(--instrument-guide-y),
+      transparent 0,
+      transparent 44px,
+      rgba(7, 4, 24, 0.78) 46px
+    );
+}
+
+.instrument-guide__ring,
+.instrument-guide__hotspot {
+  position: fixed;
+  left: var(--instrument-guide-x);
+  top: var(--instrument-guide-y);
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.instrument-guide__ring {
+  width: 72px;
+  height: 72px;
+  border: 2px solid rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 0 0 10px rgba(255, 255, 255, 0.08),
+    0 0 28px rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+  animation: instrumentGuidePulse 1.6s ease-in-out infinite;
+}
+
+.instrument-guide__hotspot {
+  width: 86px;
+  height: 86px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.instrument-guide__card {
+  position: fixed;
+  right: 16px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 164px);
+  width: min(218px, calc(100vw - 32px));
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(72, 49, 132, 0.94);
+  color: #ffffff;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.26);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.instrument-guide__card::after {
+  content: '';
+  position: absolute;
+  right: 18px;
+  bottom: -8px;
+  width: 16px;
+  height: 16px;
+  background: inherit;
+  transform: rotate(45deg);
+}
+
+.instrument-guide__card p {
+  position: relative;
+  margin: 0;
+}
+
+@keyframes instrumentGuidePulse {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+}
+
 .panel-fade-enter-active,
 .panel-fade-leave-active {
   transition:
@@ -1260,6 +1415,16 @@ function compareMasterDifficulty(
 .menu-fade-leave-to {
   opacity: 0;
   transform: translateY(-6px);
+}
+
+.instrument-guide-enter-active,
+.instrument-guide-leave-active {
+  transition: opacity 0.22s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.instrument-guide-enter-from,
+.instrument-guide-leave-to {
+  opacity: 0;
 }
 
 @media (max-width: 720px) {

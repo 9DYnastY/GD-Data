@@ -13,6 +13,7 @@ const props = defineProps<{
 const host = ref<HTMLElement | null>(null)
 const shouldLoad = ref(false)
 const hasError = ref(false)
+const imageLoaded = ref(false)
 const resolvedSrc = ref<string | null>(null)
 let observer: IntersectionObserver | null = null
 let resolveSequence = 0
@@ -28,10 +29,12 @@ async function resolveImageSource() {
 
   if (!shouldLoad.value || !props.src) {
     resolvedSrc.value = null
+    imageLoaded.value = false
     return
   }
 
   hasError.value = false
+  imageLoaded.value = false
 
   if (!shouldUseNativeCoverCache(props.src, props.cacheKey)) {
     resolvedSrc.value = props.src
@@ -107,6 +110,7 @@ function syncImageLifecycle() {
     resolveSequence += 1
     resolvedSrc.value = null
     hasError.value = false
+    imageLoaded.value = false
     disconnectObserver()
     return
   }
@@ -128,6 +132,7 @@ onMounted(syncImageLifecycle)
 
 watch([() => props.src, () => props.cacheKey, () => props.eager], () => {
   hasError.value = false
+  imageLoaded.value = false
   retryCount = 0
   syncImageLifecycle()
 })
@@ -138,7 +143,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="host" class="lazy-cover">
+  <div
+    ref="host"
+    class="lazy-cover"
+    :class="{
+      'lazy-cover--loading': Boolean(src) && !hasError && (!shouldLoad || !imageLoaded),
+      'lazy-cover--fallback': !src || hasError,
+    }"
+  >
     <img
       v-if="resolvedSrc && shouldLoad && !hasError"
       :src="resolvedSrc"
@@ -146,6 +158,8 @@ onBeforeUnmount(() => {
       decoding="async"
       :fetchpriority="eager ? 'high' : 'low'"
       :loading="eager ? 'eager' : 'lazy'"
+      :class="{ 'lazy-cover__image--loaded': imageLoaded }"
+      @load="imageLoaded = true"
       @error="handleImageError"
     />
     <span v-else-if="!src || hasError">{{ fallbackText }}</span>
@@ -161,9 +175,7 @@ onBeforeUnmount(() => {
   aspect-ratio: 1 / 1;
   border-radius: 10px;
   border: 0;
-  background:
-    linear-gradient(180deg, rgba(18, 14, 33, 0.94), rgba(37, 26, 69, 0.94)),
-    linear-gradient(160deg, #161122, #31285d);
+  background: #d9d6de;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -174,10 +186,65 @@ onBeforeUnmount(() => {
   letter-spacing: 0.02em;
 }
 
+.lazy-cover--loading::before {
+  content: '';
+  position: absolute;
+  inset: -35% -70%;
+  z-index: 1;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.6) 50%,
+    transparent 62%
+  );
+  background-repeat: no-repeat;
+  animation: coverSkeletonSweep 1.25s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.lazy-cover--loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    linear-gradient(135deg, #d7d3dc 0%, #eeeaf2 45%, #cbc6d1 100%),
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.28), transparent 24%),
+    radial-gradient(circle at 76% 78%, rgba(124, 113, 145, 0.13), transparent 28%);
+}
+
+.lazy-cover--fallback {
+  background:
+    linear-gradient(180deg, rgba(18, 14, 33, 0.94), rgba(37, 26, 69, 0.94)),
+    linear-gradient(160deg, #161122, #31285d);
+}
+
 .lazy-cover img {
+  position: relative;
+  z-index: 2;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+
+.lazy-cover img.lazy-cover__image--loaded {
+  opacity: 1;
+}
+
+.lazy-cover span {
+  position: relative;
+  z-index: 2;
+}
+
+@keyframes coverSkeletonSweep {
+  from {
+    transform: translate3d(-34%, -18%, 0);
+  }
+
+  to {
+    transform: translate3d(34%, 18%, 0);
+  }
 }
 
 @media (max-width: 720px) {
