@@ -8,6 +8,7 @@ const props = defineProps<{
   alt: string
   fallbackText: string
   eager?: boolean
+  animateLoading?: boolean
 }>()
 
 const host = ref<HTMLElement | null>(null)
@@ -148,6 +149,7 @@ onBeforeUnmount(() => {
     class="lazy-cover"
     :class="{
       'lazy-cover--loading': Boolean(src) && !hasError && (!shouldLoad || !imageLoaded),
+      'lazy-cover--loading-animated': Boolean(src) && !hasError && (!shouldLoad || !imageLoaded) && animateLoading !== false,
       'lazy-cover--fallback': !src || hasError,
     }"
   >
@@ -186,7 +188,7 @@ onBeforeUnmount(() => {
   letter-spacing: 0.02em;
 }
 
-.lazy-cover--loading::before {
+.lazy-cover--loading-animated::before {
   content: '';
   position: absolute;
   inset: -35% -70%;

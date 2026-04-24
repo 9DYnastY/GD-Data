@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import DifficultyRangeSlider from '../components/DifficultyRangeSlider.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -15,6 +15,8 @@ import {
 } from '../lib/bjmania/client'
 import { preloadCoverImages, preloadCoverImagesNow } from '../lib/cover-preload'
 import { loadSongCatalog } from '../lib/song-catalog'
+import { useElementScale } from '../lib/use-element-scale'
+import { useWindowVirtualList } from '../lib/use-window-virtual-list'
 import type {
   BjmaniaScoreFamily,
   BjmaniaScoreListItem,
@@ -42,10 +44,10 @@ type SearchFilters = {
 
 const SEARCH_STORAGE_KEY = 'gddata:last-search'
 const INSTRUMENT_GUIDE_STORAGE_KEY = 'gddata:home-instrument-guide-shown'
-const PAGE_SIZE = 20
 const VISIBLE_COVER_PRELOAD_LIMIT = 8
 const SKILL_COVER_PRELOAD_LIMIT_PER_FAMILY = 8
 const STARTUP_COVER_PRELOAD_TIMEOUT_MS = 2800
+const SONG_CARD_WIDTH = 375
 const FULL_DIFFICULTY_MIN = 0
 const FULL_DIFFICULTY_MAX = 99
 const DIFFICULTY_STOPS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99]
@@ -132,8 +134,6 @@ const loading = ref(true)
 const errorMessage = ref('')
 const showFilters = ref(false)
 const openMenu = ref<SearchMenu>(null)
-const visibleCount = ref(PAGE_SIZE)
-const loadMoreTrigger = ref<HTMLElement | null>(null)
 const topShellRef = ref<HTMLElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const searchQuery = ref(
@@ -165,8 +165,6 @@ const sortOptions: Array<{ label: string; value: SearchSortOption }> = [
   { label: 'MAS难度-降序', value: 'difficulty-desc' },
   { label: 'MAS难度-升序', value: 'difficulty-asc' },
 ]
-
-let loadMoreObserver: IntersectionObserver | null = null
 
 function sortDefaultSkillRows(rows: BjmaniaScoreListItem[]) {
   return rows
@@ -465,65 +463,32 @@ const filteredSongs = computed(() => {
   })
 })
 
-const visibleSongs = computed(() => filteredSongs.value.slice(0, visibleCount.value))
-const hasMoreSongs = computed(() => visibleSongs.value.length < filteredSongs.value.length)
+const {
+  setContainerElement: setSongListElement,
+  totalSize: virtualSongsHeight,
+  virtualItems: virtualSongs,
+  isFastScrolling: isFastSongScrolling,
+  measureElement: measureSongElement,
+} = useWindowVirtualList(filteredSongs, {
+  estimateSize: 199,
+  gap: 36,
+  overscan: 900,
+})
+const {
+  scale: songCardScale,
+  setElement: setSongCardScaleElement,
+} = useElementScale(SONG_CARD_WIDTH)
+
+function setSongListRef(element: unknown) {
+  setSongListElement(element)
+  setSongCardScaleElement(element)
+}
 
 watch(searchQuery, (value) => {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(SEARCH_STORAGE_KEY, value)
   }
 })
-
-watch(
-  [
-    searchQuery,
-    sortOption,
-    selectedCatalogFilter,
-    selectedInstrument,
-    () => filters.versionOrder,
-    () => filters.difficultyMin,
-    () => filters.difficultyMax,
-  ],
-  () => {
-    visibleCount.value = PAGE_SIZE
-  },
-)
-
-function loadMoreSongs() {
-  if (!hasMoreSongs.value) {
-    return
-  }
-
-  visibleCount.value = Math.min(visibleCount.value + PAGE_SIZE, filteredSongs.value.length)
-}
-
-function setupLoadMoreObserver() {
-  loadMoreObserver?.disconnect()
-  loadMoreObserver = null
-
-  if (!loadMoreTrigger.value || !hasMoreSongs.value) {
-    return
-  }
-
-  if (typeof IntersectionObserver === 'undefined') {
-    return
-  }
-
-  loadMoreObserver = new IntersectionObserver(
-    (entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        loadMoreSongs()
-      }
-    },
-    {
-      root: null,
-      rootMargin: '220px 0px',
-      threshold: 0.01,
-    },
-  )
-
-  loadMoreObserver.observe(loadMoreTrigger.value)
-}
 
 function resetFilters() {
   filters.versionOrder = null
@@ -674,32 +639,20 @@ onMounted(async () => {
     errorMessage.value = error instanceof Error ? error.message : 'Failed to load catalog'
   } finally {
     loading.value = false
-    await nextTick()
-    setupLoadMoreObserver()
     requestInstrumentGuideOnce()
   }
 })
 
 watch(
-  [visibleSongs, hasMoreSongs, loadMoreTrigger],
-  async () => {
-    await nextTick()
-    setupLoadMoreObserver()
-  },
-  { flush: 'post' },
-)
-
-watch(
-  visibleSongs,
+  virtualSongs,
   (nextSongs) => {
-    preloadVisibleSongCovers(nextSongs)
+    preloadVisibleSongCovers(nextSongs.map((virtualSong) => virtualSong.item))
   },
   { flush: 'post' },
 )
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleDocumentPointerDown)
-  loadMoreObserver?.disconnect()
 })
 
 function compareMasterDifficulty(
@@ -920,7 +873,7 @@ function compareMasterDifficulty(
         {{ errorMessage }}
       </section>
 
-      <section v-else class="list-section">
+      <section v-else :ref="setSongListRef" class="list-section">
         <EmptyState
           v-if="filteredSongs.length === 0"
           :has-filters="hasActiveFilters"
@@ -928,24 +881,26 @@ function compareMasterDifficulty(
           @reset="clearAllConditions"
         />
 
-        <SongCard
-          v-for="(song, index) in visibleSongs"
-          v-else
-          :key="song.musicId"
-          :eager-cover="index < VISIBLE_COVER_PRELOAD_LIMIT"
-          :song="song"
-          :selected-instrument="selectedInstrument"
-        />
-
         <div
-          v-if="hasMoreSongs"
-          ref="loadMoreTrigger"
-          class="load-more-card"
+          v-else
+          class="virtual-list"
+          :style="{ height: `${virtualSongsHeight}px` }"
         >
-          <p>Scroll to load 20 more songs</p>
-          <button class="action-button action-button--ghost" type="button" @click="loadMoreSongs">
-            Load more
-          </button>
+          <div
+            v-for="virtualSong in virtualSongs"
+            :key="virtualSong.item.musicId"
+            :ref="(element) => measureSongElement(virtualSong.index, element)"
+            class="virtual-list__item"
+            :style="{ transform: `translateY(${virtualSong.start}px)` }"
+          >
+            <SongCard
+              :animate-cover-loading="!isFastSongScrolling"
+              :card-scale="songCardScale"
+              :eager-cover="virtualSong.index < VISIBLE_COVER_PRELOAD_LIMIT"
+              :song="virtualSong.item"
+              :selected-instrument="selectedInstrument"
+            />
+          </div>
         </div>
       </section>
     </div>
@@ -1249,6 +1204,20 @@ function compareMasterDifficulty(
   gap: 36px;
   width: min(100%, 375px);
   margin: 0 auto;
+}
+
+.virtual-list {
+  position: relative;
+  width: 100%;
+}
+
+.virtual-list__item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  contain: layout style;
+  will-change: transform;
 }
 
 .state-card,

@@ -1,10 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import skillPanelBackgroundSrc from '../assets/skill-page/Card_Skill/BACKGOUND.svg'
-import backgroundSrc from '../assets/skill-page/Card_Skill/Background.svg'
-import levelIconSrc from '../assets/skill-page/Card_Skill/LEVEL_icon.svg'
-import achieveIconSrc from '../assets/skill-page/Card_Skill/achieve_icon.svg'
-import skillIconSrc from '../assets/skill-page/Card_Skill/SKILL_ICON.svg'
+import { computed } from 'vue'
+import skillCardChromeSrc from '../assets/skill-page/Card_Skill/skill-card-chrome.png'
 import excellentStickerSrc from '../assets/skill-page/Card_Skill/stick/stick_Excellent.png'
 import fullComboStickerSrc from '../assets/skill-page/Card_Skill/stick/stick_fullcombo.png'
 import rankASrc from '../assets/skill-page/Card_Skill/stick/stick_rankA.png'
@@ -22,11 +18,9 @@ const CARD_HEIGHT = 110
 
 const props = defineProps<{
   row: BjmaniaScoreListItem
+  cardScale?: number
+  animateCoverLoading?: boolean
 }>()
-
-const cardRoot = ref<HTMLElement | null>(null)
-const cardScale = ref(1)
-let cardResizeObserver: ResizeObserver | null = null
 
 const LEVEL_COLORS: Record<LevelKey, string> = {
   master: '#C700CD',
@@ -69,32 +63,6 @@ function buildSkillIntegerPadding(value: string) {
   return '0'.repeat(Math.max(0, 3 - value.length))
 }
 
-function updateCardScale() {
-  if (!cardRoot.value) {
-    return
-  }
-
-  const nextScale = Math.min(cardRoot.value.clientWidth / CARD_WIDTH, 1)
-  cardScale.value = Number.isFinite(nextScale) && nextScale > 0 ? nextScale : 1
-}
-
-onMounted(() => {
-  updateCardScale()
-
-  if (typeof ResizeObserver === 'undefined' || !cardRoot.value) {
-    return
-  }
-
-  cardResizeObserver = new ResizeObserver(() => {
-    updateCardScale()
-  })
-  cardResizeObserver.observe(cardRoot.value)
-})
-
-onBeforeUnmount(() => {
-  cardResizeObserver?.disconnect()
-})
-
 const title = computed(() => {
   return props.row.song?.displayTitle ?? `Music #${props.row.musicId}`
 })
@@ -133,7 +101,6 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
 
 <template>
   <article
-    ref="cardRoot"
     class="skill-score-card-shell"
     :class="{
       'skill-score-card-shell--deleted': row.isDeleted,
@@ -146,15 +113,10 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
         :style="{
           width: `${CARD_WIDTH}px`,
           height: `${CARD_HEIGHT}px`,
-          transform: `scale(${cardScale})`,
+          transform: `scale(${cardScale ?? 1})`,
         }"
       >
-        <img
-          class="skill-score-card__background"
-          :src="backgroundSrc"
-          alt=""
-          aria-hidden="true"
-        />
+        <img class="skill-score-card__chrome" :src="skillCardChromeSrc" alt="" aria-hidden="true" />
 
         <div class="skill-score-card__stickers">
           <img class="skill-score-card__rank-sticker" :src="rankStickerSrc" alt="" aria-hidden="true" />
@@ -171,6 +133,7 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
           <LazyCoverImage
             class="skill-score-card__cover"
             :src="coverSrc"
+            :animate-loading="animateCoverLoading"
             :cache-key="coverCacheKey"
             :alt="`${title} cover`"
             :fallback-text="coverFallback"
@@ -183,8 +146,6 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
         </div>
 
         <div class="skill-score-card__level-area">
-          <img class="skill-score-card__level-icon" :src="levelIconSrc" alt="" aria-hidden="true" />
-          <span class="skill-score-card__level-label">LEVEL</span>
           <strong class="skill-score-card__level-value">
             <span class="skill-score-card__value-main">{{ levelValueParts.whole }}</span>
             <span v-if="levelValueParts.fraction" class="skill-score-card__value-fraction">{{ levelValueParts.fraction }}</span>
@@ -193,8 +154,6 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
         </div>
 
         <div class="skill-score-card__rate-area">
-          <img class="skill-score-card__rate-icon" :src="achieveIconSrc" alt="" aria-hidden="true" />
-          <span class="skill-score-card__rate-label">达成率</span>
           <strong
             class="skill-score-card__rate-value"
             :class="{ 'skill-score-card__rate-value--fail': displayRateText === 'Fail' }"
@@ -205,14 +164,6 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
         </div>
 
         <div class="skill-score-card__skill-area">
-          <img
-            class="skill-score-card__skill-background"
-            :src="skillPanelBackgroundSrc"
-            alt=""
-            aria-hidden="true"
-          />
-          <img class="skill-score-card__skill-icon" :src="skillIconSrc" alt="" aria-hidden="true" />
-          <span class="skill-score-card__skill-label">SKILL</span>
           <strong class="skill-score-card__skill-value">
             <span
               v-if="skillValuePadding"
@@ -252,7 +203,7 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
   will-change: transform;
 }
 
-.skill-score-card__background,
+.skill-score-card__chrome,
 .skill-score-card__stickers,
 .skill-score-card__cover-shell,
 .skill-score-card__title-area,
@@ -262,7 +213,7 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
   position: absolute;
 }
 
-.skill-score-card__background {
+.skill-score-card__chrome {
   top: 0;
   left: 0;
   width: 374px;
@@ -359,36 +310,6 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
   z-index: 2;
 }
 
-.skill-score-card__level-icon {
-  position: absolute;
-  top: 6px;
-  left: 3px;
-  width: 18.4px;
-  height: 25px;
-}
-
-.skill-score-card__level-label,
-.skill-score-card__rate-label,
-.skill-score-card__skill-label {
-  position: absolute;
-  display: flex;
-  align-items: center;
-  color: #21008d;
-  font-family: 'Exo 2', var(--font-figma-title);
-  font-style: italic;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-  font-feature-settings: 'pnum' 1, 'lnum' 1;
-}
-
-.skill-score-card__level-label {
-  top: 6px;
-  left: 17px;
-  font-size: 14px;
-  line-height: 20px;
-}
-
 .skill-score-card__level-value,
 .skill-score-card__rate-value {
   position: absolute;
@@ -427,25 +348,6 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
   z-index: 2;
 }
 
-.skill-score-card__rate-icon {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 24.55px;
-  height: 34.32px;
-  transform: rotate(6.33deg);
-  transform-origin: center;
-}
-
-.skill-score-card__rate-label {
-  top: 7px;
-  left: 17px;
-  font-size: 14px;
-  line-height: 20px;
-  transform: skewX(-9deg) scaleX(0.94);
-  transform-origin: left center;
-}
-
 .skill-score-card__rate-value {
   top: 33px;
   left: 3px;
@@ -463,30 +365,6 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
   width: 103px;
   height: 70px;
   z-index: 2;
-}
-
-.skill-score-card__skill-background {
-  position: absolute;
-  top: 2px;
-  left: 0;
-  width: 103px;
-  height: 65px;
-}
-
-.skill-score-card__skill-icon {
-  position: absolute;
-  top: 6px;
-  left: 9px;
-  width: 26px;
-  height: auto;
-}
-
-.skill-score-card__skill-label {
-  top: 8px;
-  left: 46px;
-  color: #dadce2;
-  font-size: 15px;
-  line-height: 20px;
 }
 
 .skill-score-card__skill-value {

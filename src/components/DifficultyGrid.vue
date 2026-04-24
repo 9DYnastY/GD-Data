@@ -1,5 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import bassAdvSrc from '../assets/song-page/Card_Song/difficulty/bass_adv.png'
+import bassBasSrc from '../assets/song-page/Card_Song/difficulty/bass_bas.png'
+import bassExtSrc from '../assets/song-page/Card_Song/difficulty/bass_ext.png'
+import bassMasSrc from '../assets/song-page/Card_Song/difficulty/bass_mas.png'
+import drumAdvSrc from '../assets/song-page/Card_Song/difficulty/drum_adv.png'
+import drumBasSrc from '../assets/song-page/Card_Song/difficulty/drum_bas.png'
+import drumExtSrc from '../assets/song-page/Card_Song/difficulty/drum_ext.png'
+import drumMasSrc from '../assets/song-page/Card_Song/difficulty/drum_mas.png'
+import guitarAdvSrc from '../assets/song-page/Card_Song/difficulty/guitar_adv.png'
+import guitarBasSrc from '../assets/song-page/Card_Song/difficulty/guitar_bas.png'
+import guitarExtSrc from '../assets/song-page/Card_Song/difficulty/guitar_ext.png'
+import guitarMasSrc from '../assets/song-page/Card_Song/difficulty/guitar_mas.png'
 import type { DifficultySlot, InstrumentDifficulty, InstrumentKey, LevelKey } from '../types/song'
 
 const props = defineProps<{
@@ -8,6 +20,27 @@ const props = defineProps<{
   showNoteCount?: boolean
   selectedInstrument?: InstrumentKey
 }>()
+
+const COMPACT_CELL_BACKGROUNDS: Record<InstrumentKey, Record<LevelKey, string>> = {
+  bass: {
+    advanced: bassAdvSrc,
+    basic: bassBasSrc,
+    extreme: bassExtSrc,
+    master: bassMasSrc,
+  },
+  drum: {
+    advanced: drumAdvSrc,
+    basic: drumBasSrc,
+    extreme: drumExtSrc,
+    master: drumMasSrc,
+  },
+  guitar: {
+    advanced: guitarAdvSrc,
+    basic: guitarBasSrc,
+    extreme: guitarExtSrc,
+    master: guitarMasSrc,
+  },
+}
 
 function orderedLevels(levels: DifficultySlot[]) {
   return [...levels].reverse()
@@ -29,19 +62,6 @@ const compactLevels = computed(() => {
   return compactInstrument.value ? orderedLevels(compactInstrument.value.levels) : []
 })
 
-function levelAccent(level: LevelKey) {
-  switch (level) {
-    case 'master':
-      return '#C700CD'
-    case 'extreme':
-      return '#FF003B'
-    case 'advanced':
-      return '#D5B400'
-    default:
-      return '#4C89FF'
-  }
-}
-
 function levelClass(level: LevelKey) {
   switch (level) {
     case 'master':
@@ -58,6 +78,11 @@ function levelClass(level: LevelKey) {
 function displayDifficultyText(level: DifficultySlot) {
   return level.available ? level.difficultyText : '-.--'
 }
+
+function compactCellBackground(level: LevelKey) {
+  const instrument = compactInstrument.value
+  return instrument ? COMPACT_CELL_BACKGROUNDS[instrument.key][level] : ''
+}
 </script>
 
 <template>
@@ -67,36 +92,8 @@ function displayDifficultyText(level: DifficultySlot) {
       :key="`${compactInstrument.key}-${level.level}`"
       class="compact-grid__cell"
       :class="levelClass(level.level)"
+      :style="{ backgroundImage: `url(${compactCellBackground(level.level)})` }"
     >
-      <svg class="compact-grid__frame" viewBox="0 0 82 45" preserveAspectRatio="none" aria-hidden="true">
-        <rect width="82" height="45" :fill="levelAccent(level.level)" />
-        <rect x="1" y="1" width="81" height="43" fill="#262527" />
-        <path d="M82 39L82 44H77L82 39Z" :fill="levelAccent(level.level)" />
-        <path
-          d="M81.9874 9.9456L28.1655 9.97668L24.5908 0.834198L81.9848 0.838577L81.9874 9.9456Z"
-          :fill="levelAccent(level.level)"
-        />
-      </svg>
-      <svg class="compact-grid__labels" viewBox="0 0 82 45" preserveAspectRatio="none" aria-hidden="true">
-        <text
-          x="2"
-          y="10"
-          class="compact-grid__instrument-svg"
-          textLength="21"
-          lengthAdjust="spacingAndGlyphs"
-        >
-          {{ compactInstrument.label.toUpperCase() }}
-        </text>
-        <text
-          x="81"
-          y="11.5"
-          class="compact-grid__level-svg"
-          text-anchor="end"
-          lengthAdjust="spacingAndGlyphs"
-        >
-          {{ level.label.toUpperCase() }}
-        </text>
-      </svg>
       <div class="compact-grid__value" :class="{ 'compact-grid__value--missing': !level.available }">
         {{ displayDifficultyText(level) }}
       </div>
@@ -163,48 +160,13 @@ function displayDifficultyText(level: DifficultySlot) {
   width: 82px;
   height: 45px;
   overflow: hidden;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
 }
 
-.compact-grid__frame {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.compact-grid__labels,
 .compact-grid__value {
   position: relative;
   z-index: 1;
-}
-
-.compact-grid__labels {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.compact-grid__instrument-svg,
-.compact-grid__level-svg {
-  font-family: var(--font-figma-ui);
-  font-weight: 400;
-  dominant-baseline: text-after-edge;
-  text-transform: uppercase;
-}
-
-.compact-grid__instrument-svg {
-  fill: #747474;
-  font-size: 8px;
-  letter-spacing: -0.64px;
-}
-
-.compact-grid__level-svg {
-  fill: rgba(27, 22, 29, 0.85);
-  font-size: 11px;
-  letter-spacing: -0.33px;
 }
 
 .compact-grid__value {

@@ -24,6 +24,8 @@ import {
 import { BJMANIA_BASE_URL, clearBjmaniaCookies, isNativeBjmaniaHttp } from '../lib/bjmania/http'
 import { openBjmaniaNativeLogin } from '../lib/bjmania/native-auth'
 import { loadSongCatalog } from '../lib/song-catalog'
+import { useElementScale } from '../lib/use-element-scale'
+import { useWindowVirtualList } from '../lib/use-window-virtual-list'
 import type {
   BjmaniaAuthUser,
   BjmaniaGitadoraSnapshot,
@@ -36,9 +38,9 @@ import type {
 } from '../types/bjmania'
 import type { SongViewModel } from '../types/song'
 
-const SCORE_PAGE_SIZE = 50
 const AUTH_RETRY_DELAYS_MS = [400, 900]
 const PROFILE_AVATAR_GUIDE_STORAGE_KEY = 'gddata:skill-profile-avatar-guide-shown'
+const SKILL_SCORE_CARD_WIDTH = 374
 type SkillMenu = 'hot' | 'filter' | 'sort' | null
 const router = useRouter()
 const FAMILY_LABELS: Record<BjmaniaScoreFamily, string> = { dm: 'DM', gf: 'GF' }
@@ -73,7 +75,6 @@ const authUser = ref<BjmaniaAuthUser | null>(null)
 const snapshot = ref<BjmaniaGitadoraSnapshot | null>(null)
 const scoreRows = ref<BjmaniaScoreListItem[]>([])
 const recentRows = ref<BjmaniaRecentListItem[]>([])
-const visibleScoreCount = ref(SCORE_PAGE_SIZE)
 const selectedFamily = ref<BjmaniaScoreFamily>('dm')
 const selectedHotFilter = ref<BjmaniaScoreHotFilter>('all')
 const selectedScoreFilter = ref<BjmaniaScoreFilterKey>('current')
@@ -84,7 +85,6 @@ const showProfilePanel = ref(false)
 const openMenu = ref<SkillMenu>(null)
 const topShellRef = ref<HTMLElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
-const loadMoreTrigger = ref<HTMLElement | null>(null)
 const b50ExportShellRef = ref<HTMLElement | null>(null)
 const b50ExportRow = ref<BjmaniaScoreListItem | null>(null)
 const b50ExportCoverSrc = ref<string | null>(null)
@@ -132,8 +132,26 @@ const filteredScores = computed(() => {
     }
   })
 })
-const visibleScores = computed(() => filteredScores.value.slice(0, visibleScoreCount.value))
-const hasMoreScores = computed(() => filteredScores.value.length > visibleScores.value.length)
+const {
+  setContainerElement: setScoreListElement,
+  totalSize: virtualScoresHeight,
+  virtualItems: virtualScores,
+  isFastScrolling: isFastScoreScrolling,
+  measureElement: measureScoreElement,
+} = useWindowVirtualList(filteredScores, {
+  estimateSize: 110,
+  gap: 22,
+  overscan: 900,
+})
+const {
+  scale: skillCardScale,
+  setElement: setSkillCardScaleElement,
+} = useElementScale(SKILL_SCORE_CARD_WIDTH)
+
+function setScoreListRef(element: unknown) {
+  setScoreListElement(element)
+  setSkillCardScaleElement(element)
+}
 // Keep recent-play data hydrated so the upcoming RECENT PLAYS redesign can reuse the same pipeline.
 const filteredRecent = computed(() => filterRecentByFamily(recentRows.value, selectedFamily.value).slice(0, 8))
 watch(filteredRecent, () => {}, { immediate: true })
@@ -145,8 +163,6 @@ const skillSummary = computed(() => {
   }
 })
 const activeSkillValue = computed(() => skillSummary.value?.[selectedFamily.value] ?? '--')
-
-let loadMoreObserver: IntersectionObserver | null = null
 
 function setErrorMessage(target: typeof loginError | typeof dataError, error: unknown, fallback: string) {
   if (error instanceof Error && error.message) target.value = error.message
@@ -406,42 +422,6 @@ async function confirmSignOut() {
   }
 }
 
-function loadMoreScores() {
-  if (!hasMoreScores.value) {
-    return
-  }
-
-  visibleScoreCount.value = Math.min(visibleScoreCount.value + SCORE_PAGE_SIZE, filteredScores.value.length)
-}
-
-function setupLoadMoreObserver() {
-  loadMoreObserver?.disconnect()
-  loadMoreObserver = null
-
-  if (!loadMoreTrigger.value || !hasMoreScores.value) {
-    return
-  }
-
-  if (typeof IntersectionObserver === 'undefined') {
-    return
-  }
-
-  loadMoreObserver = new IntersectionObserver(
-    (entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        loadMoreScores()
-      }
-    },
-    {
-      root: null,
-      rootMargin: '220px 0px',
-      threshold: 0.01,
-    },
-  )
-
-  loadMoreObserver.observe(loadMoreTrigger.value)
-}
-
 function openFilters() { showProfilePanel.value = false; showFilters.value = true }
 function closeFilters() { showFilters.value = false; openMenu.value = null }
 function toggleFilters() { if (showFilters.value) closeFilters(); else openFilters() }
@@ -567,10 +547,6 @@ function handleDocumentPointerDown(event: PointerEvent) {
   }
 }
 
-watch([selectedFamily, selectedHotFilter, selectedScoreFilter, selectedScoreSort, scoreSearch], () => {
-  visibleScoreCount.value = SCORE_PAGE_SIZE
-})
-
 watch(
   [isAuthenticated, booting],
   ([authenticated, isBooting]) => {
@@ -586,25 +562,13 @@ watch(
   { flush: 'post' },
 )
 
-watch(
-  [visibleScores, hasMoreScores, loadMoreTrigger],
-  async () => {
-    await nextTick()
-    setupLoadMoreObserver()
-  },
-  { flush: 'post' },
-)
-
 onMounted(async () => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
   await bootstrapPage()
-  await nextTick()
-  setupLoadMoreObserver()
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleDocumentPointerDown)
-  loadMoreObserver?.disconnect()
 })
 </script>
 
@@ -757,7 +721,7 @@ onBeforeUnmount(() => {
     </transition>
 
     <div class="skill-view__inner">
-      <section class="skill-list">
+      <section :ref="setScoreListRef" class="skill-list">
         <div v-if="booting" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>检查账号信息中...</h2></div>
         <div v-else-if="!isAuthenticated" class="state-card state-card--centered">
           <p>暂无账号信息，请点击右上角头像登录，建议勾上“记住我”</p>
@@ -768,9 +732,26 @@ onBeforeUnmount(() => {
         <div v-else-if="loadingData && !snapshot" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>获取skill数据中...</h2></div>
         <div v-else-if="dataError && !snapshot" class="state-card state-card--error"><p class="state-card__eyebrow">BJMANIA</p><h2>数据拉取失败</h2><p>{{ dataError }}</p><button class="state-card__button" type="button" @click="() => hydrateSnapshot()">Retry</button></div>
         <template v-else>
-          <SkillScoreCard v-for="row in visibleScores" :key="`${row.musicId}-${row.instrument}-${row.level}`" :row="row" />
-          <div v-if="!visibleScores.length" class="state-card"><p class="state-card__eyebrow">Filter</p><h2>没有匹配到成绩</h2><p>当前筛选条件下没有 {{ FAMILY_LABELS[selectedFamily] }} 成绩记录。</p></div>
-          <div v-if="hasMoreScores" ref="loadMoreTrigger" class="skill-list__load-trigger" aria-hidden="true"></div>
+          <div v-if="!filteredScores.length" class="state-card"><p class="state-card__eyebrow">Filter</p><h2>没有匹配到成绩</h2><p>当前筛选条件下没有 {{ FAMILY_LABELS[selectedFamily] }} 成绩记录。</p></div>
+          <div
+            v-else
+            class="virtual-list"
+            :style="{ height: `${virtualScoresHeight}px` }"
+          >
+            <div
+              v-for="virtualScore in virtualScores"
+              :key="`${virtualScore.item.musicId}-${virtualScore.item.instrument}-${virtualScore.item.level}`"
+              :ref="(element) => measureScoreElement(virtualScore.index, element)"
+              class="virtual-list__item"
+              :style="{ transform: `translateY(${virtualScore.start}px)` }"
+            >
+              <SkillScoreCard
+                :animate-cover-loading="!isFastScoreScrolling"
+                :card-scale="skillCardScale"
+                :row="virtualScore.item"
+              />
+            </div>
+          </div>
         </template>
       </section>
     </div>
@@ -1389,6 +1370,20 @@ onBeforeUnmount(() => {
   margin: 0 auto;
 }
 
+.virtual-list {
+  position: relative;
+  width: 100%;
+}
+
+.virtual-list__item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  contain: layout style;
+  will-change: transform;
+}
+
 .state-card--error {
   border-color: rgba(179, 38, 30, 0.32);
 }
@@ -1404,11 +1399,6 @@ onBeforeUnmount(() => {
 
 .state-card__message--error {
   color: #b3261e;
-}
-
-.skill-list__load-trigger {
-  width: 100%;
-  height: 1px;
 }
 
 .family-fab {
