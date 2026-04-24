@@ -250,7 +250,7 @@ onBeforeUnmount(() => {
 .recent-history-view {
   --recent-safe-top: env(safe-area-inset-top, 0px);
   --recent-top-bar-padding: calc(var(--recent-safe-top) + 15px);
-  --recent-top-bar-height: calc(var(--recent-safe-top) + 70px);
+  --recent-content-top-padding: calc(var(--recent-safe-top) + 100px);
   position: relative;
   min-height: 100vh;
   overflow-x: hidden;
@@ -262,7 +262,7 @@ onBeforeUnmount(() => {
   top: 0;
   right: 0;
   left: 0;
-  z-index: 5;
+  z-index: 30;
   width: 100%;
   background: #4b3b76;
   box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
@@ -271,10 +271,10 @@ onBeforeUnmount(() => {
 .recent-history-view__topbar-inner {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   width: min(100%, 402px);
   margin: 0 auto;
-  padding: var(--recent-top-bar-padding) 20px 15px;
+  padding: var(--recent-top-bar-padding) 11px 15px;
 }
 
 .recent-history-view__back {
@@ -282,8 +282,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   color: #ffffff;
   text-decoration: none;
 }
@@ -299,6 +299,9 @@ onBeforeUnmount(() => {
 }
 
 .recent-history-view__topbar h1 {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
   margin: 0;
   color: #ffffff;
   font-family: var(--font-figma-title);
@@ -313,7 +316,7 @@ onBeforeUnmount(() => {
   z-index: 1;
   width: min(100%, 402px);
   margin: 0 auto;
-  padding: calc(var(--recent-top-bar-height) + 31px) 18px 96px;
+  padding: var(--recent-content-top-padding) 18px 96px;
 }
 
 .recent-history-view__sync {
@@ -386,7 +389,7 @@ onBeforeUnmount(() => {
 .family-fab {
   position: fixed;
   right: 14px;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 32px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
   z-index: 32;
   display: inline-flex;
   align-items: center;

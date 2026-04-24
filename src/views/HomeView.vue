@@ -965,7 +965,7 @@ function compareMasterDifficulty(
 .home-view {
   --home-safe-top: env(safe-area-inset-top, 0px);
   --home-top-bar-padding: calc(var(--home-safe-top) + 15px);
-  --home-content-top-padding: calc(var(--home-safe-top) + 108px);
+  --home-content-top-padding: calc(var(--home-safe-top) + 100px);
   position: relative;
   min-height: 100vh;
 }
@@ -1015,7 +1015,7 @@ function compareMasterDifficulty(
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  min-height: 47px;
+  min-height: 40px;
   padding-left: 4px;
   border-radius: 28px;
   background: #ece6f0;
@@ -1023,7 +1023,7 @@ function compareMasterDifficulty(
 }
 
 .search-shell__input {
-  min-height: 47px;
+  min-height: 40px;
   padding: 4px 20px 4px 20px;
   border: 0;
   background: transparent;
@@ -1048,8 +1048,8 @@ function compareMasterDifficulty(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1061,8 +1061,8 @@ function compareMasterDifficulty(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border: 0;
   border-radius: 999px;

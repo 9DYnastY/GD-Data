@@ -90,6 +90,8 @@ const b50ExportRow = ref<BjmaniaScoreListItem | null>(null)
 const b50ExportCoverSrc = ref<string | null>(null)
 const generatingB50 = ref(false)
 const showAvatarGuide = ref(false)
+const showSignOutConfirm = ref(false)
+const signingOut = ref(false)
 
 const isNativeRuntime = computed(() => isNativeBjmaniaHttp())
 const isAuthenticated = computed(() => authUser.value !== null)
@@ -375,6 +377,33 @@ async function handleSignOut() {
   loginError.value = ''
   showProfilePanel.value = false
   showAvatarGuide.value = false
+  showSignOutConfirm.value = false
+}
+
+function openSignOutConfirm() {
+  showAvatarGuide.value = false
+  showSignOutConfirm.value = true
+}
+
+function cancelSignOut() {
+  if (signingOut.value) {
+    return
+  }
+
+  showSignOutConfirm.value = false
+}
+
+async function confirmSignOut() {
+  if (signingOut.value) {
+    return
+  }
+
+  signingOut.value = true
+  try {
+    await handleSignOut()
+  } finally {
+    signingOut.value = false
+  }
 }
 
 function loadMoreScores() {
@@ -663,7 +692,7 @@ onBeforeUnmount(() => {
               :skill-value="activeSkillValue"
               @generate-b50="handleGenerateB50"
               @play-history="handleOpenPlayHistory"
-              @sign-out="handleSignOut"
+              @sign-out="openSignOutConfirm"
             />
             <div v-else class="profile-panel-card profile-panel-card--state">
               <p class="profile-panel-card__eyebrow">BJMANIA</p>
@@ -671,7 +700,7 @@ onBeforeUnmount(() => {
               <p>{{ dataError || '登录态已确认，但技能数据暂时不可用。' }}</p>
               <div class="profile-panel-card__actions">
                 <button class="profile-panel-card__button" type="button" @click="() => hydrateSnapshot()">Retry</button>
-                <button class="profile-panel-card__button profile-panel-card__button--muted" type="button" @click="handleSignOut">Sign out</button>
+                <button class="profile-panel-card__button profile-panel-card__button--muted" type="button" @click="openSignOutConfirm">Sign out</button>
               </div>
             </div>
           </section>
@@ -690,6 +719,39 @@ onBeforeUnmount(() => {
         ></button>
         <div class="avatar-guide__card" @click.stop>
           <p>再次点击头像可展开信息面板</p>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="sign-out-dialog">
+      <div
+        v-if="showSignOutConfirm"
+        class="sign-out-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sign-out-dialog-title"
+        @click.self="cancelSignOut"
+      >
+        <div class="sign-out-dialog__card">
+          <h2 id="sign-out-dialog-title">确定要登出账号吗？</h2>
+          <div class="sign-out-dialog__actions">
+            <button
+              class="sign-out-dialog__button sign-out-dialog__button--ghost"
+              type="button"
+              :disabled="signingOut"
+              @click="cancelSignOut"
+            >
+              取消
+            </button>
+            <button
+              class="sign-out-dialog__button"
+              type="button"
+              :disabled="signingOut"
+              @click="confirmSignOut"
+            >
+              确定
+            </button>
+          </div>
         </div>
       </div>
     </transition>
@@ -779,7 +841,7 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  min-height: 47px;
+  min-height: 40px;
   padding-left: 4px;
   border-radius: 28px;
   background: #ece6f0;
@@ -787,7 +849,7 @@ onBeforeUnmount(() => {
 }
 
 .search-shell__input {
-  min-height: 47px;
+  min-height: 40px;
   padding: 4px 20px 4px 20px;
   border: 0;
   background: transparent;
@@ -813,8 +875,8 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -852,7 +914,7 @@ onBeforeUnmount(() => {
 
 .avatar-guide {
   --avatar-guide-x: min(calc(100vw - 35px), calc(50vw + 166px));
-  --avatar-guide-y: calc(var(--skill-top-bar-padding) + 24px);
+  --avatar-guide-y: calc(var(--skill-top-bar-padding) + 20px);
   position: fixed;
   inset: 0;
   z-index: 80;
@@ -923,6 +985,92 @@ onBeforeUnmount(() => {
 .avatar-guide__card p {
   position: relative;
   margin: 0;
+}
+
+.sign-out-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(20, 12, 48, 0.34);
+  backdrop-filter: blur(8px);
+}
+
+.sign-out-dialog__card {
+  display: grid;
+  gap: 18px;
+  width: min(100%, 312px);
+  padding: 22px 20px 18px;
+  box-sizing: border-box;
+  border: 1px solid rgba(79, 55, 138, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 56px rgba(31, 16, 63, 0.24);
+}
+
+.sign-out-dialog__card h2 {
+  margin: 0;
+  color: #1d1741;
+  font-family: var(--font-sans);
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.sign-out-dialog__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sign-out-dialog__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #4f378a;
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sign-out-dialog__button:disabled {
+  opacity: 0.68;
+  cursor: default;
+}
+
+.sign-out-dialog__button--ghost {
+  background: rgba(79, 55, 138, 0.1);
+  color: #4f378a;
+}
+
+.sign-out-dialog-enter-active,
+.sign-out-dialog-leave-active {
+  transition: opacity 0.16s ease;
+}
+
+.sign-out-dialog-enter-active .sign-out-dialog__card,
+.sign-out-dialog-leave-active .sign-out-dialog__card {
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), opacity 0.16s ease;
+}
+
+.sign-out-dialog-enter-from,
+.sign-out-dialog-leave-to {
+  opacity: 0;
+}
+
+.sign-out-dialog-enter-from .sign-out-dialog__card,
+.sign-out-dialog-leave-to .sign-out-dialog__card {
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
 }
 
 @keyframes avatarGuidePulse {

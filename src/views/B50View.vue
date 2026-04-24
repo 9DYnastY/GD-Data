@@ -2,6 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import B50Poster from '../components/B50Poster.vue'
+import b50ButtonSrc from '../assets/skill-page/Player_Board/b50_button.svg'
+import dmModeToggleSrc from '../assets/skill-toggle/dm-mode.svg'
+import gfModeToggleSrc from '../assets/skill-toggle/gf-mode.svg'
 import { B50_POSTER_HEIGHT, B50_POSTER_WIDTH, getB50RowKey, selectB50BucketRows } from '../lib/b50'
 import { exportElementAsImage, preloadImageSource, resolveImageSourceForExport } from '../lib/b50-export'
 import { loadBjmaniaSkillSnapshotCache, saveBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
@@ -17,6 +20,10 @@ const EXPORT_OPTIONS = {
   format: 'jpeg' as const,
   quality: 0.8,
   scale: 2,
+}
+const FAMILY_TOGGLE_ASSETS: Record<BjmaniaScoreFamily, string> = {
+  dm: dmModeToggleSrc,
+  gf: gfModeToggleSrc,
 }
 
 const route = useRoute()
@@ -44,6 +51,8 @@ let noticeTimer: ReturnType<typeof setTimeout> | null = null
 const selectedFamily = computed<BjmaniaScoreFamily>(() => (
   route.query.family === 'gf' ? 'gf' : 'dm'
 ))
+const selectedFamilyLabel = computed(() => selectedFamily.value.toUpperCase())
+const selectedFamilyToggleSrc = computed(() => FAMILY_TOGGLE_ASSETS[selectedFamily.value])
 const hotRows = computed(() => selectB50BucketRows(scoreRows.value, selectedFamily.value, true))
 const otherRows = computed(() => selectB50BucketRows(scoreRows.value, selectedFamily.value, false))
 const currentRows = computed(() => [...hotRows.value, ...otherRows.value])
@@ -325,6 +334,10 @@ function switchFamily(family: BjmaniaScoreFamily) {
   })
 }
 
+function cycleFamily() {
+  switchFamily(selectedFamily.value === 'dm' ? 'gf' : 'dm')
+}
+
 watch(currentRows, (rows) => {
   exportCoverMap.value = null
   void hydratePreviewCovers(rows)
@@ -351,36 +364,20 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="b50-view">
-    <header class="b50-view__toolbar">
-      <RouterLink class="b50-view__nav-button" to="/skill">返回 Skill</RouterLink>
-
-      <div class="b50-view__family-switch" aria-label="B50 mode">
-        <button
-          class="b50-view__family-button"
-          :class="{ 'b50-view__family-button--active': selectedFamily === 'dm' }"
-          type="button"
-          @click="switchFamily('dm')"
+    <header class="b50-view__topbar">
+      <div class="b50-view__topbar-inner">
+        <RouterLink
+          class="b50-view__back"
+          :to="{ name: 'skill' }"
+          aria-label="返回 Skill"
         >
-          DM
-        </button>
-        <button
-          class="b50-view__family-button"
-          :class="{ 'b50-view__family-button--active': selectedFamily === 'gf' }"
-          type="button"
-          @click="switchFamily('gf')"
-        >
-          GF
-        </button>
+          <svg viewBox="0 0 40 40" aria-hidden="true">
+            <path d="M24.5 9.5L14 20L24.5 30.5" />
+            <path d="M15 20H34" />
+          </svg>
+        </RouterLink>
+        <h1>B50</h1>
       </div>
-
-      <button
-        class="b50-view__nav-button b50-view__nav-button--primary"
-        type="button"
-        :disabled="loading || exporting || !currentRows.length"
-        @click="handleExport"
-      >
-        导出
-      </button>
     </header>
 
     <div v-if="loading && !snapshot" class="b50-view__state-card">
@@ -463,76 +460,97 @@ onBeforeUnmount(() => {
         {{ noticeMessage }}
       </div>
     </transition>
+
+    <button
+      class="export-fab"
+      type="button"
+      :disabled="loading || exporting || !currentRows.length"
+      aria-label="导出 B50"
+      @click="handleExport"
+    >
+      <img class="export-fab__icon" :src="b50ButtonSrc" alt="" aria-hidden="true" />
+      <span>导出</span>
+    </button>
+
+    <button
+      class="family-fab"
+      type="button"
+      :aria-label="`切换 B50 模式，当前 ${selectedFamilyLabel}`"
+      @click="cycleFamily"
+    >
+      <img class="family-fab__image" :src="selectedFamilyToggleSrc" alt="" aria-hidden="true" />
+    </button>
   </section>
 </template>
 
 <style scoped>
 .b50-view {
+  --b50-safe-top: env(safe-area-inset-top, 0px);
+  --b50-top-bar-padding: calc(var(--b50-safe-top) + 15px);
+  --b50-content-top-padding: calc(var(--b50-safe-top) + 100px);
   min-height: 100vh;
-  padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 28px;
+  padding: 0 14px 28px;
   background:
     radial-gradient(circle at top left, rgba(136, 96, 239, 0.18), transparent 28%),
     linear-gradient(180deg, #f7f5fb 0%, #ece6fb 100%);
 }
 
-.b50-view__toolbar {
+.b50-view__topbar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 30;
+  width: 100%;
+  background: #4b3b76;
+  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
+}
+
+.b50-view__topbar-inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  margin: 0 auto 16px;
-  width: min(100%, 1440px);
+  width: min(100%, 402px);
+  margin: 0 auto;
+  padding: var(--b50-top-bar-padding) 11px 15px;
 }
 
-.b50-view__nav-button,
-.b50-view__family-button {
-  border: none;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #3b286e;
-  font: inherit;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
-  box-shadow: 0 10px 26px rgba(74, 48, 144, 0.12);
-}
-
-.b50-view__nav-button {
-  padding: 11px 18px;
-}
-
-.b50-view__nav-button--primary {
-  background: linear-gradient(135deg, #6135d2, #8a64ea);
-  color: #fff;
-}
-
-.b50-view__nav-button:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-.b50-view__family-switch {
+.b50-view__back {
   display: inline-flex;
-  padding: 4px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 10px 26px rgba(74, 48, 144, 0.12);
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  color: #ffffff;
+  text-decoration: none;
 }
 
-.b50-view__family-button {
-  min-width: 68px;
-  padding: 9px 16px;
-  background: transparent;
-  box-shadow: none;
+.b50-view__back svg {
+  width: 34px;
+  height: 34px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  stroke-width: 3.2;
 }
 
-.b50-view__family-button--active {
-  background: linear-gradient(135deg, #4f22be, #7a54e7);
-  color: #fff;
+.b50-view__topbar h1 {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  margin: 0;
+  color: #ffffff;
+  font-family: var(--font-figma-title);
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0.01em;
 }
 
 .b50-view__state-card {
-  margin: 56px auto 0;
+  margin: var(--b50-content-top-padding) auto 0;
   width: min(100%, 520px);
   padding: 28px 24px;
   border-radius: 24px;
@@ -568,6 +586,7 @@ onBeforeUnmount(() => {
 .b50-view__content {
   width: min(100%, 1440px);
   margin: 0 auto;
+  padding-top: var(--b50-content-top-padding);
 }
 
 .b50-view__refreshing {
@@ -610,6 +629,64 @@ onBeforeUnmount(() => {
 
 .b50-view__export-shell {
   width: max-content;
+}
+
+.export-fab,
+.family-fab {
+  position: fixed;
+  right: 14px;
+  z-index: 32;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.family-fab {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
+}
+
+.family-fab__image {
+  display: block;
+  width: 56px;
+  height: 56px;
+}
+
+.export-fab {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 162px);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 1px;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: #715ea6;
+  color: #ffffff;
+  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.export-fab:disabled {
+  opacity: 0.62;
+  cursor: default;
+}
+
+.export-fab__icon {
+  display: block;
+  width: 32px;
+  height: 32px;
+  filter: brightness(0) invert(1);
 }
 
 .b50-view__loading-mask {
@@ -710,14 +787,6 @@ onBeforeUnmount(() => {
 @media (max-width: 720px) {
   .b50-view {
     padding-inline: 10px;
-  }
-
-  .b50-view__toolbar {
-    flex-wrap: wrap;
-  }
-
-  .b50-view__family-switch {
-    order: 3;
   }
 }
 </style>
