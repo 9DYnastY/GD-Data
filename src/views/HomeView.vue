@@ -14,7 +14,7 @@ import {
   mapBestScoresToList,
 } from '../lib/bjmania/client'
 import { preloadCoverImages, preloadCoverImagesNow } from '../lib/cover-preload'
-import { loadSongCatalog } from '../lib/song-catalog'
+import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
 import { useElementScale } from '../lib/use-element-scale'
 import { useWindowVirtualList } from '../lib/use-window-virtual-list'
 import type {
@@ -148,6 +148,8 @@ const filters = reactive<SearchFilters>({
   difficultyMin: FULL_DIFFICULTY_MIN,
   difficultyMax: FULL_DIFFICULTY_MAX,
 })
+
+let stopSongCatalogUpdateListener: (() => void) | null = null
 
 const SONG_FILTER_OPTIONS: Array<{ value: SongCatalogFilterKey; label: string }> = [
   { value: 'current', label: '现有曲目' },
@@ -469,6 +471,7 @@ const {
   virtualItems: virtualSongs,
   isFastScrolling: isFastSongScrolling,
   measureElement: measureSongElement,
+  resetMeasurements: resetSongMeasurements,
 } = useWindowVirtualList(filteredSongs, {
   estimateSize: 199,
   gap: 36,
@@ -623,6 +626,12 @@ function handleDocumentPointerDown(event: PointerEvent) {
 
 onMounted(async () => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
+  stopSongCatalogUpdateListener = onSongCatalogUpdated((nextSongs) => {
+    songs.value = nextSongs
+    void resetSongMeasurements()
+    preloadVisibleSongCovers(filteredSongs.value)
+    preloadCachedSkillCovers(nextSongs)
+  })
 
   try {
     songs.value = await loadSongCatalog()
@@ -653,6 +662,8 @@ watch(
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleDocumentPointerDown)
+  stopSongCatalogUpdateListener?.()
+  stopSongCatalogUpdateListener = null
 })
 
 function compareMasterDifficulty(

@@ -23,7 +23,7 @@ import {
 } from '../lib/bjmania/client'
 import { BJMANIA_BASE_URL, clearBjmaniaCookies, isNativeBjmaniaHttp } from '../lib/bjmania/http'
 import { openBjmaniaNativeLogin } from '../lib/bjmania/native-auth'
-import { loadSongCatalog } from '../lib/song-catalog'
+import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
 import { useElementScale } from '../lib/use-element-scale'
 import { useWindowVirtualList } from '../lib/use-window-virtual-list'
 import type {
@@ -92,6 +92,7 @@ const generatingB50 = ref(false)
 const showAvatarGuide = ref(false)
 const showSignOutConfirm = ref(false)
 const signingOut = ref(false)
+let stopSongCatalogUpdateListener: (() => void) | null = null
 
 const isNativeRuntime = computed(() => isNativeBjmaniaHttp())
 const isAuthenticated = computed(() => authUser.value !== null)
@@ -138,6 +139,7 @@ const {
   virtualItems: virtualScores,
   isFastScrolling: isFastScoreScrolling,
   measureElement: measureScoreElement,
+  resetMeasurements: resetScoreMeasurements,
 } = useWindowVirtualList(filteredScores, {
   estimateSize: 110,
   gap: 22,
@@ -564,11 +566,19 @@ watch(
 
 onMounted(async () => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
+  stopSongCatalogUpdateListener = onSongCatalogUpdated((songs) => {
+    if (snapshot.value) {
+      applySnapshotData(snapshot.value, songs)
+      void resetScoreMeasurements()
+    }
+  })
   await bootstrapPage()
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleDocumentPointerDown)
+  stopSongCatalogUpdateListener?.()
+  stopSongCatalogUpdateListener = null
 })
 </script>
 

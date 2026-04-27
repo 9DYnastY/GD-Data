@@ -109,6 +109,12 @@ export function useWindowVirtualList<T>(
     scheduleRefresh()
   }
 
+  async function resetMeasurements() {
+    clearMeasurements()
+    await nextTick()
+    scheduleRefresh()
+  }
+
   const layout = computed(() => {
     sizeVersion.value
 
@@ -248,5 +254,6 @@ export function useWindowVirtualList<T>(
     isFastScrolling,
     measureElement,
     refreshViewport,
+    resetMeasurements,
   }
 }

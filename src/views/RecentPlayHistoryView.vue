@@ -10,7 +10,7 @@ import {
   loadBjmaniaGitadoraSnapshot,
   mapRecentPlaysToList,
 } from '../lib/bjmania/client'
-import { loadSongCatalog } from '../lib/song-catalog'
+import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
 import type {
   BjmaniaGitadoraSnapshot,
   BjmaniaRecentListItem,
@@ -36,6 +36,7 @@ const snapshot = ref<BjmaniaGitadoraSnapshot | null>(null)
 const recentRows = ref<BjmaniaRecentListItem[]>([])
 const loadedFromCache = ref(false)
 const viewportWidth = ref(typeof window === 'undefined' ? 402 : window.innerWidth)
+let stopSongCatalogUpdateListener: (() => void) | null = null
 
 const selectedFamily = computed<BjmaniaScoreFamily>(() => (
   route.query.family === 'gf' ? 'gf' : 'dm'
@@ -165,11 +166,18 @@ function updateViewportWidth() {
 onMounted(() => {
   updateViewportWidth()
   window.addEventListener('resize', updateViewportWidth, { passive: true })
+  stopSongCatalogUpdateListener = onSongCatalogUpdated((songs) => {
+    if (snapshot.value) {
+      applySnapshot(snapshot.value, songs)
+    }
+  })
   void bootstrapPage()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateViewportWidth)
+  stopSongCatalogUpdateListener?.()
+  stopSongCatalogUpdateListener = null
 })
 </script>
 

@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import DifficultyGrid from '../components/DifficultyGrid.vue'
 import LazyCoverImage from '../components/LazyCoverImage.vue'
-import { loadSongByMusicId } from '../lib/song-catalog'
+import { loadSongByMusicId, onSongCatalogUpdated } from '../lib/song-catalog'
 import type { SongViewModel } from '../types/song'
 
 const route = useRoute()
 const song = ref<SongViewModel>()
 const loading = ref(true)
 const errorMessage = ref('')
+let stopSongCatalogUpdateListener: (() => void) | null = null
 
 const facts = computed(() => {
   if (!song.value) {
@@ -55,7 +56,16 @@ async function loadCurrentSong() {
 }
 
 watch(() => route.params.musicId, loadCurrentSong)
-onMounted(loadCurrentSong)
+onMounted(() => {
+  stopSongCatalogUpdateListener = onSongCatalogUpdated(() => {
+    void loadCurrentSong()
+  })
+  void loadCurrentSong()
+})
+onBeforeUnmount(() => {
+  stopSongCatalogUpdateListener?.()
+  stopSongCatalogUpdateListener = null
+})
 </script>
 
 <template>

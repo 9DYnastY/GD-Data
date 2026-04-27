@@ -10,7 +10,7 @@ import { exportElementAsImage, preloadImageSource, resolveImageSourceForExport }
 import { loadBjmaniaSkillSnapshotCache, saveBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
 import { loadBjmaniaGitadoraSnapshot, mapBestScoresToList, rawSkillToText } from '../lib/bjmania/client'
 import { resolveCoverImageSource } from '../lib/cover-cache'
-import { loadSongCatalog } from '../lib/song-catalog'
+import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
 import type { BjmaniaGitadoraSnapshot, BjmaniaScoreFamily, BjmaniaScoreListItem } from '../types/bjmania'
 import type { SongViewModel } from '../types/song'
 
@@ -47,6 +47,7 @@ const noticeVisible = ref(false)
 let previewResizeObserver: ResizeObserver | null = null
 let previewCoverSequence = 0
 let noticeTimer: ReturnType<typeof setTimeout> | null = null
+let stopSongCatalogUpdateListener: (() => void) | null = null
 
 const selectedFamily = computed<BjmaniaScoreFamily>(() => (
   route.query.family === 'gf' ? 'gf' : 'dm'
@@ -345,6 +346,11 @@ watch(currentRows, (rows) => {
 
 onMounted(() => {
   updatePreviewScale()
+  stopSongCatalogUpdateListener = onSongCatalogUpdated((songs) => {
+    if (snapshot.value) {
+      applySnapshot(snapshot.value, songs)
+    }
+  })
 
   if (typeof ResizeObserver !== 'undefined' && previewShellRef.value) {
     previewResizeObserver = new ResizeObserver(() => {
@@ -358,6 +364,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   previewResizeObserver?.disconnect()
+  stopSongCatalogUpdateListener?.()
+  stopSongCatalogUpdateListener = null
   clearNotice()
 })
 </script>
