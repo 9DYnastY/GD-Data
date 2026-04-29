@@ -319,7 +319,13 @@ export async function loadBjmaniaGitadoraSnapshot() {
   const authUser = await getBjmaniaAuthMe()
   const profiles = await getBjmaniaProfiles()
   const gitadoraGame = profiles.profiles.find((profile) => profile.gameCode === GITADORA_GAME_CODE)
-  const currentVersion = gitadoraGame?.gameVersions[0]
+  const currentVersion = gitadoraGame?.gameVersions.reduce<number | null>((latestVersion, version) => {
+    if (!Number.isFinite(version)) {
+      return latestVersion
+    }
+
+    return latestVersion === null ? version : Math.max(latestVersion, version)
+  }, null)
 
   if (typeof currentVersion !== 'number') {
     throw new Error('Could not resolve the current GITADORA version from GetProfiles')
@@ -516,6 +522,7 @@ export function mapBestScoresToList(
 
       return {
         musicId: score.musicId,
+        rawScore: score,
         song,
         family: sheet.family,
         instrument: sheet.instrument,
@@ -564,12 +571,77 @@ function formatRecentTimestamp(timestamp: number) {
   }).format(new Date(timestamp * 1000))
 }
 
+function normalizeIntegerField(value: unknown) {
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return value
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isInteger(parsed) ? parsed : null
+  }
+
+  return null
+}
+
 function recentPayloadToSheet(payload: BjmaniaRecentPlayPayload | null) {
-  if (!payload || typeof payload.Seq !== 'number') {
+  const gameSpec = normalizeIntegerField(payload?.GameSpec)
+  const seq = normalizeIntegerField(payload?.Seq)
+
+  if (gameSpec === null || seq === null) {
     return null
   }
 
-  return resolveScoreSheet(payload.Seq)
+  if (gameSpec === 1 && seq >= 1 && seq <= 4) {
+    const level = LEVEL_BY_INDEX[seq]
+
+    return level
+      ? {
+          family: 'dm' as const,
+          instrument: 'drum' as const,
+          level,
+          label: LEVEL_LABELS[level],
+          branchLabel: null,
+          skillFumen: seq,
+        }
+      : null
+  }
+
+  if (gameSpec !== 0) {
+    return null
+  }
+
+  if (seq >= 1 && seq <= 4) {
+    const level = LEVEL_BY_INDEX[seq]
+
+    return level
+      ? {
+          family: 'gf' as const,
+          instrument: 'guitar' as const,
+          level,
+          label: LEVEL_LABELS[level],
+          branchLabel: 'Guitar',
+          skillFumen: seq,
+        }
+      : null
+  }
+
+  if (seq >= 5 && seq <= 8) {
+    const level = LEVEL_BY_INDEX[seq - 4]
+
+    return level
+      ? {
+          family: 'gf' as const,
+          instrument: 'bass' as const,
+          level,
+          label: LEVEL_LABELS[level],
+          branchLabel: 'Bass',
+          skillFumen: seq,
+        }
+      : null
+  }
+
+  return null
 }
 
 function recentClearLabel(options: {

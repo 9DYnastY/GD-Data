@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, type CSSProperties } from 'vue'
 import skillIconSrc from '../assets/skill-page/Player_Board/Skill_icon.svg'
 import { resolveSkillToneStyle, splitSkillValueText } from '../lib/skill-tone'
 
@@ -7,9 +7,11 @@ const props = defineProps<{
   displayName: string
   title: string
   skillValue: string
+  nameToneStyle?: CSSProperties | null
 }>()
 
 const skillToneStyle = computed(() => resolveSkillToneStyle(props.skillValue))
+const nameToneStyle = computed(() => props.nameToneStyle ?? skillToneStyle.value)
 const skillValueParts = computed(() => splitSkillValueText(props.skillValue))
 </script>
 
@@ -40,7 +42,7 @@ const skillValueParts = computed(() => splitSkillValueText(props.skillValue))
       <h2
         class="b50-player-board__name"
         :title="props.displayName"
-        :style="skillToneStyle"
+        :style="nameToneStyle"
       >
         {{ props.displayName || 'NO NAME' }}
       </h2>

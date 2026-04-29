@@ -10,7 +10,9 @@ import { exportElementAsImage, preloadImageSource, resolveImageSourceForExport }
 import { loadBjmaniaSkillSnapshotCache, saveBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
 import { loadBjmaniaGitadoraSnapshot, mapBestScoresToList, rawSkillToText } from '../lib/bjmania/client'
 import { resolveCoverImageSource } from '../lib/cover-cache'
+import { useDebugMode } from '../lib/debug-mode'
 import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
+import { resolveSkillToneStyle } from '../lib/skill-tone'
 import type { BjmaniaGitadoraSnapshot, BjmaniaScoreFamily, BjmaniaScoreListItem } from '../types/bjmania'
 import type { SongViewModel } from '../types/song'
 
@@ -25,9 +27,29 @@ const FAMILY_TOGGLE_ASSETS: Record<BjmaniaScoreFamily, string> = {
   dm: dmModeToggleSrc,
   gf: gfModeToggleSrc,
 }
+const DEBUG_NAME_TONE_OPTIONS = [
+  { label: 'White', skillValue: '0.00' },
+  { label: 'Orange', skillValue: '1200.00' },
+  { label: 'Orange+', skillValue: '1600.00' },
+  { label: 'Yellow', skillValue: '2200.00' },
+  { label: 'Yellow+', skillValue: '2600.00' },
+  { label: 'Green', skillValue: '3200.00' },
+  { label: 'Green+', skillValue: '3600.00' },
+  { label: 'Blue', skillValue: '4200.00' },
+  { label: 'Blue+', skillValue: '4600.00' },
+  { label: 'Purple', skillValue: '5200.00' },
+  { label: 'Purple+', skillValue: '5600.00' },
+  { label: 'Red', skillValue: '6200.00' },
+  { label: 'Red+', skillValue: '6600.00' },
+  { label: 'Bronze', skillValue: '7200.00' },
+  { label: 'Silver', skillValue: '7600.00' },
+  { label: 'Gold', skillValue: '8200.00' },
+  { label: 'Rainbow', skillValue: '8600.00' },
+] as const
 
 const route = useRoute()
 const router = useRouter()
+const debugModeEnabled = useDebugMode()
 
 const previewShellRef = ref<HTMLElement | null>(null)
 const exportPosterRef = ref<HTMLElement | null>(null)
@@ -43,6 +65,7 @@ const exportCoverMap = ref<Record<string, string | null> | null>(null)
 const noticeMessage = ref('')
 const noticeKind = ref<'success' | 'error'>('success')
 const noticeVisible = ref(false)
+const debugNameToneIndex = ref(0)
 
 let previewResizeObserver: ResizeObserver | null = null
 let previewCoverSequence = 0
@@ -60,6 +83,10 @@ const currentRows = computed(() => [...hotRows.value, ...otherRows.value])
 const activeCoverMap = computed(() => exportCoverMap.value ?? previewCoverMap.value)
 const playerName = computed(() => snapshot.value?.gitadoraProfile.name?.trim() || snapshot.value?.authUser.name || 'NO NAME')
 const playerTitle = computed(() => snapshot.value?.gitadoraProfile.title?.trim() || 'GITADORA PLAYER')
+const debugNameTone = computed(() => DEBUG_NAME_TONE_OPTIONS[debugNameToneIndex.value])
+const playerNameToneStyle = computed(() => (
+  debugModeEnabled.value ? resolveSkillToneStyle(debugNameTone.value.skillValue) : null
+))
 const skillValue = computed(() => {
   if (!snapshot.value) {
     return '--'
@@ -339,6 +366,10 @@ function cycleFamily() {
   switchFamily(selectedFamily.value === 'dm' ? 'gf' : 'dm')
 }
 
+function cycleDebugNameTone() {
+  debugNameToneIndex.value = (debugNameToneIndex.value + 1) % DEBUG_NAME_TONE_OPTIONS.length
+}
+
 watch(currentRows, (rows) => {
   exportCoverMap.value = null
   void hydratePreviewCovers(rows)
@@ -424,6 +455,7 @@ onBeforeUnmount(() => {
                 :hot-rows="hotRows"
                 :other-rows="otherRows"
                 :cover-map="activeCoverMap"
+                :player-name-tone-style="playerNameToneStyle"
               />
             </div>
           </div>
@@ -440,6 +472,7 @@ onBeforeUnmount(() => {
             :hot-rows="hotRows"
             :other-rows="otherRows"
             :cover-map="activeCoverMap"
+            :player-name-tone-style="playerNameToneStyle"
           />
         </div>
       </div>
@@ -487,6 +520,17 @@ onBeforeUnmount(() => {
       @click="cycleFamily"
     >
       <img class="family-fab__image" :src="selectedFamilyToggleSrc" alt="" aria-hidden="true" />
+    </button>
+
+    <button
+      v-if="debugModeEnabled"
+      class="debug-color-fab"
+      type="button"
+      :aria-label="`切换 PlayerBoard 名字颜色，当前 ${debugNameTone.label}`"
+      @click="cycleDebugNameTone"
+    >
+      <span class="debug-color-fab__swatch" :style="playerNameToneStyle" aria-hidden="true">A</span>
+      <span>颜色</span>
     </button>
   </section>
 </template>
@@ -640,7 +684,8 @@ onBeforeUnmount(() => {
 }
 
 .export-fab,
-.family-fab {
+.family-fab,
+.debug-color-fab {
   position: fixed;
   right: 14px;
   z-index: 32;
@@ -695,6 +740,36 @@ onBeforeUnmount(() => {
   width: 32px;
   height: 32px;
   filter: brightness(0) invert(1);
+}
+
+.debug-color-fab {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 232px);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: #4f378a;
+  color: #ffffff;
+  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.debug-color-fab__swatch {
+  display: block;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  font-family: var(--font-figma-title);
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 28px;
+  text-align: center;
 }
 
 .b50-view__loading-mask {

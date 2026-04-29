@@ -2,7 +2,7 @@ import type { InstrumentKey, LevelKey, SongViewModel } from './song'
 
 export type BjmaniaScoreFamily = 'dm' | 'gf'
 export type BjmaniaScoreHotFilter = 'all' | 'hot' | 'other'
-export type BjmaniaScoreFilterKey = 'current' | 'skill' | 'deleted' | 'classic' | 'non-classic'
+export type BjmaniaScoreFilterKey = 'current' | 'skill' | 'skill-candidate' | 'deleted' | 'classic' | 'non-classic'
 export type BjmaniaScoreSortKey =
   | 'skill-desc'
   | 'skill-asc'
@@ -176,6 +176,7 @@ export interface BjmaniaScoreSheet {
 
 export interface BjmaniaScoreListItem {
   musicId: number
+  rawScore?: BjmaniaBestScoreItem
   song: SongViewModel | null
   family: BjmaniaScoreFamily
   instrument: InstrumentKey

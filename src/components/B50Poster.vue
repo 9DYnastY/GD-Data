@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, type CSSProperties } from 'vue'
 import pageBackgroundSrc from '../assets/b50-page/Page_B50/b50_background.png'
 import decorationBackgroundSrc from '../assets/b50-page/Page_B50/decoration_background.png'
 import versionLogoSrc from '../assets/b50-page/Page_B50/version_logo.png'
@@ -16,6 +16,7 @@ const props = defineProps<{
   hotRows: BjmaniaScoreListItem[]
   otherRows: BjmaniaScoreListItem[]
   coverMap?: Record<string, string | null>
+  playerNameToneStyle?: CSSProperties | null
 }>()
 
 const POSTER_TEXT_TOP = {
@@ -71,6 +72,7 @@ const modeLabelLeft = computed(() => (props.family === 'gf' ? 2235 : 2265))
         :display-name="props.playerName"
         :title="props.playerTitle"
         :skill-value="props.skillValue"
+        :name-tone-style="props.playerNameToneStyle"
       />
     </div>
 

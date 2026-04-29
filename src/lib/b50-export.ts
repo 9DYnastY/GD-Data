@@ -67,6 +67,29 @@ export interface B50ExportOptions {
   scale?: number
 }
 
+interface RelativeRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+interface ExportTextPart {
+  text: string
+  rect: RelativeRect
+  fontFamily: string
+  fontSize: number
+  fontStyle: string
+  fontWeight: string
+  letterSpacing: number
+}
+
+interface ExportGradientTextOverlay {
+  backgroundImage: string
+  rect: RelativeRect
+  parts: ExportTextPart[]
+}
+
 const EXPORT_MIME_TYPE: Record<B50ExportFormat, string> = {
   png: 'image/png',
   jpeg: 'image/jpeg',
@@ -89,6 +112,214 @@ function normalizeExportQuality(quality?: number) {
   const nextQuality = Number(quality)
   const normalized = nextQuality > 1 ? nextQuality / 100 : nextQuality
   return Math.min(Math.max(normalized, 0), 1)
+}
+
+function parseCssPixelValue(value: string, fallback = 0) {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function toRelativeRect(rect: DOMRect, rootRect: DOMRect): RelativeRect {
+  return {
+    left: rect.left - rootRect.left,
+    top: rect.top - rootRect.top,
+    width: rect.width,
+    height: rect.height,
+  }
+}
+
+function getElementStyle(element: HTMLElement) {
+  return element.ownerDocument.defaultView?.getComputedStyle(element) ?? window.getComputedStyle(element)
+}
+
+function hasGradientTextStyle(element: HTMLElement) {
+  const style = getElementStyle(element)
+  const backgroundImage = element.style.backgroundImage || style.backgroundImage
+
+  return (
+    backgroundImage.includes('linear-gradient') &&
+    (
+      style.backgroundClip === 'text' ||
+      style.getPropertyValue('-webkit-background-clip') === 'text'
+    )
+  )
+}
+
+function buildTextPart(element: HTMLElement, rootRect: DOMRect): ExportTextPart {
+  const style = getElementStyle(element)
+  const fontSize = parseCssPixelValue(style.fontSize, 16)
+  const letterSpacing = style.letterSpacing === 'normal'
+    ? 0
+    : parseCssPixelValue(style.letterSpacing, 0)
+
+  return {
+    text: (element.textContent ?? '').trim(),
+    rect: toRelativeRect(element.getBoundingClientRect(), rootRect),
+    fontFamily: style.fontFamily,
+    fontSize,
+    fontStyle: style.fontStyle || 'normal',
+    fontWeight: style.fontWeight || '400',
+    letterSpacing,
+  }
+}
+
+function collectGradientTextOverlays(root: HTMLElement): ExportGradientTextOverlay[] {
+  if (typeof window === 'undefined') {
+    return []
+  }
+
+  const rootRect = root.getBoundingClientRect()
+  const gradientElements = Array.from(
+    root.querySelectorAll<HTMLElement>('.b50-player-board__name, .b50-player-board__skill-value'),
+  ).filter(hasGradientTextStyle)
+
+  return gradientElements.map((element) => {
+    const style = getElementStyle(element)
+    const parts = element.matches('.b50-player-board__skill-value')
+      ? Array.from(element.querySelectorAll<HTMLElement>('span')).map((part) => buildTextPart(part, rootRect))
+      : [buildTextPart(element, rootRect)]
+
+    return {
+      backgroundImage: element.style.backgroundImage || style.backgroundImage,
+      rect: toRelativeRect(element.getBoundingClientRect(), rootRect),
+      parts,
+    }
+  })
+}
+
+function hideGradientTextForHtml2Canvas(clonedRoot: HTMLElement) {
+  const gradientElements = Array.from(
+    clonedRoot.querySelectorAll<HTMLElement>('.b50-player-board__name, .b50-player-board__skill-value'),
+  ).filter(hasGradientTextStyle)
+
+  for (const element of gradientElements) {
+    element.style.background = 'none'
+    element.style.backgroundImage = 'none'
+    element.style.color = 'transparent'
+    element.style.webkitTextFillColor = 'transparent'
+  }
+}
+
+function parseGradientStops(backgroundImage: string) {
+  const stops: Array<{ color: string; offset: number }> = []
+  const stopPattern = /((?:rgba?\([^)]*\))|(?:#[0-9a-fA-F]{3,8}))\s+([0-9.]+)%/g
+  let match: RegExpExecArray | null
+
+  while ((match = stopPattern.exec(backgroundImage)) !== null) {
+    const offset = Number.parseFloat(match[2]) / 100
+
+    if (Number.isFinite(offset)) {
+      stops.push({
+        color: match[1],
+        offset: Math.min(1, Math.max(0, offset)),
+      })
+    }
+  }
+
+  return stops
+}
+
+function buildCanvasGradient(
+  context: CanvasRenderingContext2D,
+  overlay: ExportGradientTextOverlay,
+  scaleY: number,
+) {
+  const top = overlay.rect.top * scaleY
+  const bottom = (overlay.rect.top + overlay.rect.height) * scaleY
+  const gradient = context.createLinearGradient(0, top, 0, bottom)
+  const stops = parseGradientStops(overlay.backgroundImage)
+
+  if (!stops.length) {
+    gradient.addColorStop(0, '#ffffff')
+    gradient.addColorStop(1, '#ffffff')
+    return gradient
+  }
+
+  gradient.addColorStop(0, stops[0].color)
+
+  for (const stop of stops) {
+    gradient.addColorStop(stop.offset, stop.color)
+  }
+
+  gradient.addColorStop(1, stops[stops.length - 1].color)
+  return gradient
+}
+
+function drawTextWithLetterSpacing(
+  context: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  letterSpacing: number,
+) {
+  if (!letterSpacing) {
+    context.fillText(text, x, y)
+    return
+  }
+
+  let nextX = x
+
+  for (const char of Array.from(text)) {
+    context.fillText(char, nextX, y)
+    nextX += context.measureText(char).width + letterSpacing
+  }
+}
+
+function drawGradientTextOverlays(
+  canvas: HTMLCanvasElement,
+  root: HTMLElement,
+  overlays: ExportGradientTextOverlay[],
+) {
+  if (!overlays.length || !root.offsetWidth || !root.offsetHeight) {
+    return canvas
+  }
+
+  const outputCanvas = document.createElement('canvas')
+  outputCanvas.width = canvas.width
+  outputCanvas.height = canvas.height
+
+  const context = outputCanvas.getContext('2d')
+  if (!context) {
+    return canvas
+  }
+
+  context.drawImage(canvas, 0, 0)
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.globalAlpha = 1
+  context.globalCompositeOperation = 'source-over'
+
+  const scaleX = canvas.width / root.offsetWidth
+  const scaleY = canvas.height / root.offsetHeight
+
+  for (const overlay of overlays) {
+    const gradient = buildCanvasGradient(context, overlay, scaleY)
+
+    for (const part of overlay.parts) {
+      if (!part.text || part.rect.width <= 0 || part.rect.height <= 0) {
+        continue
+      }
+
+      const x = part.rect.left * scaleX
+      const y = part.rect.top * scaleY
+      const width = part.rect.width * scaleX
+      const height = part.rect.height * scaleY
+      const fontSize = part.fontSize * scaleY
+      const letterSpacing = part.letterSpacing * scaleX
+
+      context.save()
+      context.beginPath()
+      context.rect(x, y, width, height)
+      context.clip()
+      context.fillStyle = gradient
+      context.font = `${part.fontStyle} ${part.fontWeight} ${fontSize}px ${part.fontFamily}`
+      context.textAlign = 'left'
+      context.textBaseline = 'top'
+      drawTextWithLetterSpacing(context, part.text, x, y, letterSpacing)
+      context.restore()
+    }
+  }
+
+  return outputCanvas
 }
 
 export function preloadImageSource(source: string | null) {
@@ -230,6 +461,7 @@ export async function exportElementAsImage(
 ) {
   await waitForFonts()
   await waitForImages(node)
+  const gradientTextOverlays = collectGradientTextOverlays(node)
 
   const [{ default: html2canvas }, filesystemModule] = await Promise.all([
     import('html2canvas'),
@@ -253,11 +485,15 @@ export async function exportElementAsImage(
     height: node.offsetHeight,
     windowWidth: node.scrollWidth,
     windowHeight: node.scrollHeight,
+    onclone: (_document, clonedElement) => {
+      hideGradientTextForHtml2Canvas(clonedElement as HTMLElement)
+    },
   })
+  const exportCanvas = drawGradientTextOverlays(canvas, node, gradientTextOverlays)
 
   const dataUrl = format === 'jpeg'
-    ? canvas.toDataURL(mimeType, quality)
-    : canvas.toDataURL(mimeType)
+    ? exportCanvas.toDataURL(mimeType, quality)
+    : exportCanvas.toDataURL(mimeType)
   const filename = buildFilename(baseName, format)
 
   if (Capacitor.getPlatform() === 'web') {

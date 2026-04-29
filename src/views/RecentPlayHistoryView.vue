@@ -5,6 +5,7 @@ import RecentPlayCard from '../components/RecentPlayCard.vue'
 import dmModeToggleSrc from '../assets/skill-toggle/dm-mode.svg'
 import gfModeToggleSrc from '../assets/skill-toggle/gf-mode.svg'
 import { loadBjmaniaSkillSnapshotCache, saveBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
+import { useDebugMode } from '../lib/debug-mode'
 import {
   filterRecentByFamily,
   loadBjmaniaGitadoraSnapshot,
@@ -25,9 +26,21 @@ const FAMILY_TOGGLE_ASSETS: Record<BjmaniaScoreFamily, string> = {
 const RECENT_CARD_WIDTH = 366
 const RECENT_CARD_HEIGHT = 184
 const RECENT_CARD_HORIZONTAL_PADDING = 36
+const MAPPING_DEBUG_PAYLOAD_KEYS = [
+  'MusicId',
+  'Seq',
+  'GameSpec',
+  'CabinetInfo',
+  'GitadoraVersion',
+  'Skill',
+  'NewSkill',
+  'Perc',
+  'Rank',
+] as const
 
 const route = useRoute()
 const router = useRouter()
+const debugModeEnabled = useDebugMode()
 
 const loading = ref(true)
 const refreshing = ref(false)
@@ -159,6 +172,56 @@ function rowKey(row: BjmaniaRecentListItem, index: number) {
   return `${row.timestamp}-${row.musicId ?? 'unknown'}-${row.instrument ?? 'unknown'}-${row.level ?? 'unknown'}-${index}`
 }
 
+function formatDebugValue(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '--'
+  }
+
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+
+  return String(value)
+}
+
+function mappingDebugRows(row: BjmaniaRecentListItem) {
+  const payload = row.payload
+  const mappedRows = [
+    ['mapped.family', row.family],
+    ['mapped.instrument', row.instrument],
+    ['mapped.branchLabel', row.branchLabel],
+    ['mapped.level', row.level],
+    ['mapped.sheetLabel', row.sheetLabel],
+    ['mapped.difficultyRaw', row.difficultyRaw],
+    ['mapped.difficultyText', row.difficultyText],
+  ] as const
+  const payloadRows = MAPPING_DEBUG_PAYLOAD_KEYS.map((key) => [
+    `payload.${key}`,
+    payload?.[key],
+  ] as const)
+
+  return [...mappedRows, ...payloadRows].map(([label, value]) => ({
+    label,
+    value: formatDebugValue(value),
+  }))
+}
+
+function mappingDebugPayloadJson(row: BjmaniaRecentListItem) {
+  if (!row.payload) {
+    return '{}'
+  }
+
+  try {
+    return JSON.stringify(row.payload, null, 2)
+  } catch {
+    return '{}'
+  }
+}
+
 function updateViewportWidth() {
   viewportWidth.value = window.innerWidth
 }
@@ -238,7 +301,29 @@ onBeforeUnmount(() => {
           :key="rowKey(row, index)"
           class="recent-history-view__card-shell"
         >
-          <RecentPlayCard :row="row" />
+          <div class="recent-history-view__card-frame">
+            <RecentPlayCard :row="row" />
+          </div>
+          <section
+            v-if="debugModeEnabled"
+            class="recent-history-view__debug-panel"
+            aria-label="mapping debug"
+          >
+            <div class="recent-history-view__debug-grid">
+              <div
+                v-for="debugRow in mappingDebugRows(row)"
+                :key="debugRow.label"
+                class="recent-history-view__debug-row"
+              >
+                <span>{{ debugRow.label }}</span>
+                <strong>{{ debugRow.value }}</strong>
+              </div>
+            </div>
+            <details class="recent-history-view__debug-details">
+              <summary>raw payload</summary>
+              <pre>{{ mappingDebugPayloadJson(row) }}</pre>
+            </details>
+          </section>
         </div>
       </section>
     </main>
@@ -380,18 +465,89 @@ onBeforeUnmount(() => {
   --recent-card-scale: 1;
   display: grid;
   justify-items: center;
-  gap: calc(44px * var(--recent-card-scale));
+  gap: calc(28px * var(--recent-card-scale));
 }
 
 .recent-history-view__card-shell {
+  display: grid;
+  gap: calc(10px * var(--recent-card-scale));
+  width: calc(var(--recent-card-width) * var(--recent-card-scale));
+  height: auto;
+  overflow: visible;
+}
+
+.recent-history-view__card-frame {
   width: calc(var(--recent-card-width) * var(--recent-card-scale));
   height: calc(var(--recent-card-height) * var(--recent-card-scale));
   overflow: visible;
 }
 
-.recent-history-view__card-shell > :deep(.recent-play-card) {
+.recent-history-view__card-frame > :deep(.recent-play-card) {
   transform: scale(var(--recent-card-scale));
   transform-origin: top left;
+}
+
+.recent-history-view__debug-panel {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid rgba(79, 55, 138, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #261b53;
+  box-shadow: 0 8px 18px rgba(41, 26, 90, 0.1);
+  backdrop-filter: blur(8px);
+}
+
+.recent-history-view__debug-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.recent-history-view__debug-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 8px;
+  align-items: start;
+  font-family: var(--font-figma-title);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.recent-history-view__debug-row span {
+  color: rgba(46, 33, 94, 0.68);
+  overflow-wrap: anywhere;
+}
+
+.recent-history-view__debug-row strong {
+  color: #23164d;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.recent-history-view__debug-details {
+  font-family: var(--font-figma-title);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.recent-history-view__debug-details summary {
+  color: #4f378a;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.recent-history-view__debug-details pre {
+  max-height: 180px;
+  margin: 8px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(35, 22, 77, 0.08);
+  color: #201546;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .family-fab {

@@ -23,6 +23,7 @@ import {
 } from '../lib/bjmania/client'
 import { BJMANIA_BASE_URL, clearBjmaniaCookies, isNativeBjmaniaHttp } from '../lib/bjmania/http'
 import { openBjmaniaNativeLogin } from '../lib/bjmania/native-auth'
+import { useDebugMode } from '../lib/debug-mode'
 import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
 import { useElementScale } from '../lib/use-element-scale'
 import { useWindowVirtualList } from '../lib/use-window-virtual-list'
@@ -43,6 +44,7 @@ const PROFILE_AVATAR_GUIDE_STORAGE_KEY = 'gddata:skill-profile-avatar-guide-show
 const SKILL_SCORE_CARD_WIDTH = 374
 type SkillMenu = 'hot' | 'filter' | 'sort' | null
 const router = useRouter()
+const debugModeEnabled = useDebugMode()
 const FAMILY_LABELS: Record<BjmaniaScoreFamily, string> = { dm: 'DM', gf: 'GF' }
 const FAMILY_TOGGLE_ASSETS: Record<BjmaniaScoreFamily, string> = { dm: dmModeToggleSrc, gf: gfModeToggleSrc }
 const HOT_FILTER_OPTIONS: Array<{ value: BjmaniaScoreHotFilter; label: string }> = [
@@ -53,6 +55,7 @@ const HOT_FILTER_OPTIONS: Array<{ value: BjmaniaScoreHotFilter; label: string }>
 const SCORE_FILTER_OPTIONS: Array<{ value: BjmaniaScoreFilterKey; label: string }> = [
   { value: 'current', label: '现有曲目' },
   { value: 'skill', label: 'Skill曲目' },
+  { value: 'skill-candidate', label: '候选Skill曲目' },
   { value: 'deleted', label: '删除曲目' },
   { value: 'classic', label: '展示Classic曲目' },
   { value: 'non-classic', label: '隐藏Classic曲目' },
@@ -113,6 +116,7 @@ const filteredScores = computed(() => {
   rows = rows.filter((row) => {
     switch (selectedScoreFilter.value) {
       case 'skill': return row.inSkill
+      case 'skill-candidate': return !row.inSkill && !row.isDeleted
       case 'deleted': return row.isDeleted
       case 'classic': return row.isClassic
       case 'non-classic': return !row.isClassic && !row.isDeleted
@@ -165,10 +169,77 @@ const skillSummary = computed(() => {
   }
 })
 const activeSkillValue = computed(() => skillSummary.value?.[selectedFamily.value] ?? '--')
+const skillApiDebugSections = computed(() => {
+  if (!snapshot.value) {
+    return []
+  }
+
+  return [
+    { title: 'GetAccountInfo', data: authUser.value },
+    { title: 'GetProfiles', data: snapshot.value.profiles },
+    { title: 'GetGitadoraProfile', data: snapshot.value.gitadoraProfile },
+  ]
+})
 
 function setErrorMessage(target: typeof loginError | typeof dataError, error: unknown, fallback: string) {
   if (error instanceof Error && error.message) target.value = error.message
   else target.value = fallback
+}
+
+function formatDebugValue(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '--'
+  }
+
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+
+  return String(value)
+}
+
+function formatDebugJson(value: unknown) {
+  if (value === null || value === undefined) {
+    return '{}'
+  }
+
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return '{}'
+  }
+}
+
+function skillScoreDebugRows(row: BjmaniaScoreListItem) {
+  const rawScore = row.rawScore
+  const rows = [
+    ['mapped.family', row.family],
+    ['mapped.instrument', row.instrument],
+    ['mapped.branchLabel', row.branchLabel],
+    ['mapped.level', row.level],
+    ['mapped.difficultyRaw', row.difficultyRaw],
+    ['mapped.skillCalcRaw', row.skillCalcRaw],
+    ['mapped.inSkill', row.inSkill],
+    ['raw.musicId', rawScore?.musicId],
+    ['raw.fumen', rawScore?.fumen],
+    ['raw.percRaw', rawScore?.percRaw],
+    ['raw.rank', rawScore?.rank],
+    ['raw.autoClear', rawScore?.autoClear],
+    ['raw.clear', rawScore?.clear],
+    ['raw.fullCombo', rawScore?.fullCombo],
+    ['raw.excellent', rawScore?.excellent],
+    ['raw.meter', rawScore?.meter],
+    ['raw.meterProg', rawScore?.meterProg],
+  ] as const
+
+  return rows.map(([label, value]) => ({
+    label,
+    value: formatDebugValue(value),
+  }))
 }
 
 function applySnapshotData(nextSnapshot: BjmaniaGitadoraSnapshot, songs: SongViewModel[]) {
@@ -564,6 +635,10 @@ watch(
   { flush: 'post' },
 )
 
+watch(debugModeEnabled, () => {
+  void resetScoreMeasurements()
+}, { flush: 'post' })
+
 onMounted(async () => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
   stopSongCatalogUpdateListener = onSongCatalogUpdated((songs) => {
@@ -742,7 +817,23 @@ onBeforeUnmount(() => {
         <div v-else-if="loadingData && !snapshot" class="state-card"><p class="state-card__eyebrow">BJMANIA</p><h2>获取skill数据中...</h2></div>
         <div v-else-if="dataError && !snapshot" class="state-card state-card--error"><p class="state-card__eyebrow">BJMANIA</p><h2>数据拉取失败</h2><p>{{ dataError }}</p><button class="state-card__button" type="button" @click="() => hydrateSnapshot()">Retry</button></div>
         <template v-else>
-          <div v-if="!filteredScores.length" class="state-card"><p class="state-card__eyebrow">Filter</p><h2>没有匹配到成绩</h2><p>当前筛选条件下没有 {{ FAMILY_LABELS[selectedFamily] }} 成绩记录。</p></div>
+          <section
+            v-if="debugModeEnabled && snapshot"
+            class="skill-debug-panel skill-debug-panel--api"
+            aria-label="skill api debug"
+          >
+            <details
+              v-for="section in skillApiDebugSections"
+              :key="section.title"
+              class="skill-debug-details"
+              open
+            >
+              <summary>{{ section.title }}</summary>
+              <pre>{{ formatDebugJson(section.data) }}</pre>
+            </details>
+          </section>
+
+          <div v-if="!filteredScores.length" class="state-card"><h2>没有匹配到成绩</h2><p>当前筛选条件下没有 {{ FAMILY_LABELS[selectedFamily] }} 成绩记录。</p></div>
           <div
             v-else
             class="virtual-list"
@@ -760,6 +851,26 @@ onBeforeUnmount(() => {
                 :card-scale="skillCardScale"
                 :row="virtualScore.item"
               />
+              <section
+                v-if="debugModeEnabled"
+                class="skill-debug-panel skill-debug-panel--score"
+                aria-label="skill score debug"
+              >
+                <div class="skill-debug-grid">
+                  <div
+                    v-for="debugRow in skillScoreDebugRows(virtualScore.item)"
+                    :key="debugRow.label"
+                    class="skill-debug-row"
+                  >
+                    <span>{{ debugRow.label }}</span>
+                    <strong>{{ debugRow.value }}</strong>
+                  </div>
+                </div>
+                <details class="skill-debug-details" open>
+                  <summary>raw best score</summary>
+                  <pre>{{ formatDebugJson(virtualScore.item.rawScore) }}</pre>
+                </details>
+              </section>
             </div>
           </div>
         </template>
@@ -1391,7 +1502,77 @@ onBeforeUnmount(() => {
   left: 0;
   right: 0;
   contain: layout style;
+  display: grid;
+  gap: 8px;
   will-change: transform;
+}
+
+.skill-debug-panel {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 374px);
+  margin: 0 auto;
+  padding: 10px;
+  border: 1px solid rgba(79, 55, 138, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #261b53;
+  box-shadow: 0 8px 18px rgba(41, 26, 90, 0.1);
+  backdrop-filter: blur(8px);
+}
+
+.skill-debug-panel--api {
+  gap: 10px;
+}
+
+.skill-debug-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.skill-debug-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 8px;
+  align-items: start;
+  font-family: var(--font-figma-title);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.skill-debug-row span {
+  color: rgba(46, 33, 94, 0.68);
+  overflow-wrap: anywhere;
+}
+
+.skill-debug-row strong {
+  color: #23164d;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.skill-debug-details {
+  font-family: var(--font-figma-title);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.skill-debug-details summary {
+  color: #4f378a;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.skill-debug-details pre {
+  max-height: 220px;
+  margin: 8px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(35, 22, 77, 0.08);
+  color: #201546;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .state-card--error {

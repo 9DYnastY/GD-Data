@@ -418,7 +418,4 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
   filter: saturate(0.94);
 }
 
-.skill-score-card-shell--deleted {
-  opacity: 0.76;
-}
 </style>

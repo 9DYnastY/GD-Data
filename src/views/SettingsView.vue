@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import appLogoSrc from '../assets/app/app-logo-noback.svg'
 import {
@@ -7,8 +7,10 @@ import {
   getInstalledAppVersionLabel,
 } from '../lib/app-update'
 import { clearCoverImageCache, getCoverImageCacheSize } from '../lib/cover-cache'
+import { setDebugModeEnabled, useDebugMode } from '../lib/debug-mode'
 
 const router = useRouter()
+const debugModeEnabled = useDebugMode()
 const appVersionLabel = ref('1.1.0')
 const cacheSizeBytes = ref(0)
 const loadingCacheSize = ref(true)
@@ -17,6 +19,8 @@ const checkingUpdate = ref(false)
 const showClearConfirm = ref(false)
 const successMessage = ref('')
 const errorMessage = ref('')
+const logoTapCount = ref(0)
+let logoTapTimer: ReturnType<typeof setTimeout> | null = null
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -109,6 +113,34 @@ async function handleCheckUpdate() {
   }
 }
 
+function resetLogoTapCount() {
+  logoTapCount.value = 0
+
+  if (logoTapTimer) {
+    clearTimeout(logoTapTimer)
+    logoTapTimer = null
+  }
+}
+
+function handleLogoDebugTap() {
+  if (logoTapTimer) {
+    clearTimeout(logoTapTimer)
+  }
+
+  logoTapCount.value += 1
+
+  if (logoTapCount.value >= 10) {
+    const nextEnabled = !debugModeEnabled.value
+    setDebugModeEnabled(nextEnabled)
+    successMessage.value = nextEnabled ? '调试模式已开启' : '调试模式已关闭'
+    errorMessage.value = ''
+    resetLogoTapCount()
+    return
+  }
+
+  logoTapTimer = setTimeout(resetLogoTapCount, 1400)
+}
+
 async function goBack() {
   if (window.history.length > 1) {
     await router.back()
@@ -122,6 +154,10 @@ onMounted(() => {
   void refreshAppVersion()
   void refreshCacheSize()
 })
+
+onBeforeUnmount(() => {
+  resetLogoTapCount()
+})
 </script>
 
 <template>
@@ -133,7 +169,14 @@ onMounted(() => {
         </svg>
       </button>
 
-      <img class="settings-view__logo" :src="appLogoSrc" alt="GITADORA Song Browser" />
+      <button
+        class="settings-view__logo-button"
+        type="button"
+        aria-label="GITADORA Song Browser"
+        @click="handleLogoDebugTap"
+      >
+        <img class="settings-view__logo" :src="appLogoSrc" alt="" aria-hidden="true" />
+      </button>
     </header>
 
     <main class="settings-view__content">
@@ -248,6 +291,18 @@ onMounted(() => {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2.4;
+}
+
+.settings-view__logo-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 86px;
+  height: 86px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
 .settings-view__logo {
