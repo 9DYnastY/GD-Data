@@ -362,10 +362,12 @@ onBeforeUnmount(() => {
         @enter="handleMainRouteEnter"
         @leave="handleMainRouteLeave"
       >
-        <component
-          :is="Component"
-          :key="viewRoute.name ?? viewRoute.fullPath"
-        />
+        <KeepAlive include="HomeView,SkillView">
+          <component
+            :is="Component"
+            :key="viewRoute.name ?? viewRoute.fullPath"
+          />
+        </KeepAlive>
       </transition>
     </RouterView>
   </div>

@@ -746,7 +746,7 @@ onBeforeUnmount(() => {
             <div v-else class="profile-panel-card profile-panel-card--state">
               <p class="profile-panel-card__eyebrow">BJMANIA</p>
               <h2>档案读取失败</h2>
-              <p>{{ dataError || '登录态已确认，但技能数据暂时不可用。' }}</p>
+              <p>{{ dataError || '登录态已确认，但Skill数据暂时不可用。' }}</p>
               <div class="profile-panel-card__actions">
                 <button class="profile-panel-card__button" type="button" @click="() => hydrateSnapshot()">Retry</button>
                 <button class="profile-panel-card__button profile-panel-card__button--muted" type="button" @click="openSignOutConfirm">Sign out</button>

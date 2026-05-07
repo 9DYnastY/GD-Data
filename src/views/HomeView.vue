@@ -15,6 +15,7 @@ import {
 } from '../lib/bjmania/client'
 import { preloadCoverImages, preloadCoverImagesNow } from '../lib/cover-preload'
 import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
+import { favoriteMusicIds } from '../lib/song-favorites'
 import { useElementScale } from '../lib/use-element-scale'
 import { useWindowVirtualList } from '../lib/use-window-virtual-list'
 import type {
@@ -34,7 +35,7 @@ type SearchSortOption =
   | 'difficulty-desc'
 
 type SearchMenu = 'version' | 'filter' | 'sort' | null
-type SongCatalogFilterKey = 'current' | 'deleted' | 'classic' | 'non-classic'
+type SongCatalogFilterKey = 'current' | 'deleted' | 'favorite' | 'classic' | 'non-classic'
 
 type SearchFilters = {
   versionOrder: number | null
@@ -154,6 +155,7 @@ let stopSongCatalogUpdateListener: (() => void) | null = null
 const SONG_FILTER_OPTIONS: Array<{ value: SongCatalogFilterKey; label: string }> = [
   { value: 'current', label: '现有曲目' },
   { value: 'deleted', label: '删除曲目' },
+  { value: 'favorite', label: '收藏曲目' },
   { value: 'classic', label: '展示Classic曲目' },
   { value: 'non-classic', label: '隐藏Classic曲目' },
 ]
@@ -386,6 +388,11 @@ const filteredSongs = computed(() => {
     switch (selectedCatalogFilter.value) {
       case 'deleted':
         if (!song.metadata.isDeleted) {
+          return false
+        }
+        break
+      case 'favorite':
+        if (!favoriteMusicIds.value.has(song.musicId)) {
           return false
         }
         break

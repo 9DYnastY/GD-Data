@@ -1,70 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import DifficultyGrid from './DifficultyGrid.vue'
 import LazyCoverImage from './LazyCoverImage.vue'
 import songCardChromeSrc from '../assets/song-page/Card_Song/song-card-chrome.png'
+import { resolveInstrumentVersionLogo } from '../lib/version-logos'
 import type { InstrumentKey, SongViewModel } from '../types/song'
 
 const CARD_WIDTH = 375
 const CARD_HEIGHT = 199
 const TITLE_MAX_WIDTH = 192
 const TITLE_SUFFIX = '.....'
-const GF_LOGO_MAP: Record<number, string> = {
-  0: '/version-logos/GF1.png',
-  1: '/version-logos/GF2.png',
-  2: '/version-logos/GF3.png',
-  3: '/version-logos/GF4.png',
-  4: '/version-logos/GF5.png',
-  5: '/version-logos/GF6.png',
-  6: '/version-logos/GF7.png',
-  7: '/version-logos/GF8.png',
-  8: '/version-logos/GF9.png',
-  9: '/version-logos/GF10.png',
-  10: '/version-logos/GF11.png',
-  11: '/version-logos/GF_V.png',
-  12: '/version-logos/GF_V2.png',
-  13: '/version-logos/GF_V3.png',
-  14: '/version-logos/GF_V4.png',
-  15: '/version-logos/GF_V5.png',
-  16: '/version-logos/GF_V6.png',
-  17: '/version-logos/GF_XG.png',
-  18: '/version-logos/GF_XG2.png',
-  19: '/version-logos/GF_XG3.png',
-}
-const DM_LOGO_MAP: Record<number, string> = {
-  0: '/version-logos/DM1.png',
-  1: '/version-logos/DM2.png',
-  2: '/version-logos/DM3.png',
-  3: '/version-logos/DM4.png',
-  4: '/version-logos/DM5.png',
-  5: '/version-logos/DM6.png',
-  6: '/version-logos/DM7.png',
-  7: '/version-logos/DM8.png',
-  8: '/version-logos/DM9.png',
-  9: '/version-logos/DM10.png',
-  10: '/version-logos/DM_V.png',
-  11: '/version-logos/DM_V2.png',
-  12: '/version-logos/DM_V3.png',
-  13: '/version-logos/DM_V4.png',
-  14: '/version-logos/DM_V5.png',
-  15: '/version-logos/DM_V6.png',
-  16: '/version-logos/DM_XG.png',
-  17: '/version-logos/DM_XG2.png',
-  18: '/version-logos/DM_XG3.png',
-}
-const GD_LOGO_MAP: Record<number, string> = {
-  20: '/version-logos/GD.png',
-  21: '/version-logos/GD_OverDrive.png',
-  22: '/version-logos/GD_Tri-Boost.png',
-  23: '/version-logos/GD_Tri-Boost_ReEVOLVE.png',
-  24: '/version-logos/GD_Matixx.png',
-  25: '/version-logos/GD_EXCHAIN.png',
-  26: '/version-logos/GD_NEXTAGE.png',
-  27: '/version-logos/GD_HIGH-VOLTAGE.png',
-  28: '/version-logos/GD_FUZZ-UP.png',
-  29: '/version-logos/GD_GALAXY_WAVE.png',
-  30: '/version-logos/GD_GALAXY_WAVE_DELTA.png',
-}
 
 const props = defineProps<{
   song: SongViewModel
@@ -77,31 +23,6 @@ const props = defineProps<{
 const titleCanvas =
   typeof document === 'undefined' ? null : document.createElement('canvas')
 const titleMeasureTick = ref(0)
-
-function parseVersionKey(versionKey: string) {
-  const [gfRaw, dmRaw] = versionKey.split('-')
-  const gfIndex = Number(gfRaw)
-  const dmIndex = Number(dmRaw)
-
-  return {
-    gfIndex: Number.isFinite(gfIndex) ? gfIndex : null,
-    dmIndex: Number.isFinite(dmIndex) ? dmIndex : null,
-  }
-}
-
-function resolveVersionLogo(versionKey: string, instrument: InstrumentKey) {
-  const { gfIndex, dmIndex } = parseVersionKey(versionKey)
-
-  if (gfIndex !== null && gfIndex >= 20) {
-    return GD_LOGO_MAP[gfIndex] ?? '/version-logos/GD_GALAXY_WAVE.png'
-  }
-
-  if (instrument === 'drum') {
-    return dmIndex !== null ? (DM_LOGO_MAP[dmIndex] ?? '/version-logos/GD_GALAXY_WAVE.png') : '/version-logos/GD_GALAXY_WAVE.png'
-  }
-
-  return gfIndex !== null ? (GF_LOGO_MAP[gfIndex] ?? '/version-logos/GD_GALAXY_WAVE.png') : '/version-logos/GD_GALAXY_WAVE.png'
-}
 
 function truncateCardTitle(title: string) {
   const context = titleCanvas?.getContext('2d')
@@ -139,11 +60,19 @@ const cardTitle = computed(() => {
   titleMeasureTick.value
   return truncateCardTitle(props.song.displayTitle)
 })
-const versionLogoSrc = computed(() => resolveVersionLogo(props.song.versionKey, props.selectedInstrument))
+const versionLogoSrc = computed(() => resolveInstrumentVersionLogo(props.song.versionKey, props.selectedInstrument))
 </script>
 
 <template>
-  <div class="song-card-shell">
+  <RouterLink
+    class="song-card-shell"
+    :to="{
+      name: 'song-detail',
+      params: { musicId: song.musicId },
+      query: { instrument: selectedInstrument },
+    }"
+    :aria-label="`查看 ${song.displayTitle} 的歌曲详情`"
+  >
     <div class="song-card">
       <div
         class="song-card__stage"
@@ -200,15 +129,24 @@ const versionLogoSrc = computed(() => resolveVersionLogo(props.song.versionKey, 
         </div>
       </div>
     </div>
-  </div>
+  </RouterLink>
 </template>
 
 <style scoped>
 .song-card-shell {
   position: relative;
+  display: block;
   width: 100%;
   aspect-ratio: 375 / 199;
   min-height: 0;
+  color: inherit;
+  text-decoration: none;
+  outline: none;
+}
+
+.song-card-shell:focus-visible {
+  border-radius: 12px;
+  box-shadow: 0 0 0 3px rgba(255, 159, 74, 0.42);
 }
 
 .song-card {

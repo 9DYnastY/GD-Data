@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import skillCardChromeSrc from '../assets/skill-page/Card_Skill/skill-card-chrome.png'
 import excellentStickerSrc from '../assets/skill-page/Card_Skill/stick/stick_Excellent.png'
 import fullComboStickerSrc from '../assets/skill-page/Card_Skill/stick/stick_fullcombo.png'
@@ -100,12 +101,18 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
 </script>
 
 <template>
-  <article
+  <RouterLink
     class="skill-score-card-shell"
     :class="{
       'skill-score-card-shell--deleted': row.isDeleted,
       'skill-score-card-shell--classic': row.isClassic,
     }"
+    :to="{
+      name: 'song-detail',
+      params: { musicId: row.musicId },
+      query: { instrument: row.instrument },
+    }"
+    :aria-label="`查看 ${title} 的歌曲详情`"
   >
     <div class="skill-score-card">
       <div
@@ -176,17 +183,26 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
         </div>
       </div>
     </div>
-  </article>
+  </RouterLink>
 </template>
 
 <style scoped>
 .skill-score-card-shell {
   position: relative;
+  display: block;
   width: min(100%, 374px);
   margin: 0 auto;
   aspect-ratio: 374 / 110;
   min-height: 0;
   overflow: visible;
+  color: inherit;
+  text-decoration: none;
+  outline: none;
+}
+
+.skill-score-card-shell:focus-visible {
+  border-radius: 12px;
+  box-shadow: 0 0 0 3px rgba(255, 159, 74, 0.42);
 }
 
 .skill-score-card {

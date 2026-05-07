@@ -1,7 +1,9 @@
 import {
   computed,
+  onActivated,
   nextTick,
   onBeforeUnmount,
+  onDeactivated,
   onMounted,
   ref,
   watch,
@@ -45,6 +47,7 @@ export function useWindowVirtualList<T>(
   let scrollIdleTimer = 0
   let lastScrollSampleY = 0
   let lastScrollSampleTime = 0
+  let listenersAttached = false
 
   function getMeasuredSize(index: number) {
     return measuredSizes.get(index) ?? options.estimateSize
@@ -225,25 +228,48 @@ export function useWindowVirtualList<T>(
     { flush: 'post' },
   )
 
-  onMounted(() => {
+  function attachListeners() {
+    if (typeof window === 'undefined' || listenersAttached) {
+      return
+    }
+
+    listenersAttached = true
     refreshViewport()
     window.addEventListener('scroll', scheduleRefresh, { passive: true })
     window.addEventListener('resize', handleResize, { passive: true })
+  }
+
+  function detachListeners() {
+    if (typeof window === 'undefined' || !listenersAttached) {
+      return
+    }
+
+    listenersAttached = false
+    window.removeEventListener('scroll', scheduleRefresh)
+    window.removeEventListener('resize', handleResize)
+
+    if (animationFrame) {
+      window.cancelAnimationFrame(animationFrame)
+      animationFrame = 0
+    }
+
+    if (scrollIdleTimer) {
+      window.clearTimeout(scrollIdleTimer)
+      scrollIdleTimer = 0
+    }
+  }
+
+  onMounted(attachListeners)
+
+  onActivated(() => {
+    attachListeners()
+    void nextTick().then(scheduleRefresh)
   })
 
+  onDeactivated(detachListeners)
+
   onBeforeUnmount(() => {
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('scroll', scheduleRefresh)
-      window.removeEventListener('resize', handleResize)
-
-      if (animationFrame) {
-        window.cancelAnimationFrame(animationFrame)
-      }
-
-      if (scrollIdleTimer) {
-        window.clearTimeout(scrollIdleTimer)
-      }
-    }
+    detachListeners()
   })
 
   return {

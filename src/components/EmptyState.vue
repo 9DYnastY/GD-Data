@@ -18,15 +18,12 @@ defineEmits<{
         没有找到包含“{{ query }}”的歌曲，请尝试更换关键词或调整筛选条件。
       </template>
       <template v-else>
-        当前筛选条件下没有可显示的歌曲，请放宽版本、曲目状态或难度范围。
+        当前筛选条件下没有可显示的歌曲。
       </template>
     </p>
     <button class="empty-state__button" type="button" @click="$emit('reset')">
       清空搜索和筛选
     </button>
-    <p v-if="hasFilters" class="empty-state__hint">
-      清空后会回到完整曲库。
-    </p>
   </section>
 </template>
 

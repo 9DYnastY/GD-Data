@@ -1,5 +1,23 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+const INSTANT_SCROLL_CLASS = 'router-instant-scroll'
+
+function restoreScrollInstantly(position: { left?: number; top?: number }) {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return position
+  }
+
+  document.documentElement.classList.add(INSTANT_SCROLL_CLASS)
+  window.setTimeout(() => {
+    document.documentElement.classList.remove(INSTANT_SCROLL_CLASS)
+  }, 120)
+
+  return {
+    ...position,
+    behavior: 'auto' as ScrollBehavior,
+  }
+}
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -49,10 +67,14 @@ const router = createRouter({
   ],
   scrollBehavior(_to, _from, savedPosition) {
     if (savedPosition) {
-      return savedPosition
+      return new Promise((resolve) => {
+        requestAnimationFrame(() => {
+          resolve(restoreScrollInstantly(savedPosition))
+        })
+      })
     }
 
-    return { top: 0 }
+    return restoreScrollInstantly({ top: 0 })
   },
 })
 

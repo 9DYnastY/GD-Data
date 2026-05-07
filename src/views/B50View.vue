@@ -422,7 +422,6 @@ onBeforeUnmount(() => {
     <div v-if="loading && !snapshot" class="b50-view__state-card">
       <p class="b50-view__state-eyebrow">B50</p>
       <h1>正在加载页面数据</h1>
-      <p>会先尝试读取 skill 页缓存，再补最新成绩。</p>
     </div>
 
     <div v-else-if="error && !snapshot" class="b50-view__state-card">
