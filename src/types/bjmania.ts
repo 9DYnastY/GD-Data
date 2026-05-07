@@ -158,6 +158,7 @@ export interface BjmaniaRecentPlaysResponse {
 export interface BjmaniaGitadoraSnapshot {
   authUser: BjmaniaAuthUser
   currentVersion: number
+  availableVersions: number[]
   profiles: BjmaniaProfilesResponse
   gitadoraProfile: BjmaniaGitadoraProfile
   bestScores: BjmaniaBestScoresResponse

@@ -47,6 +47,14 @@ const router = useRouter()
 const debugModeEnabled = useDebugMode()
 const FAMILY_LABELS: Record<BjmaniaScoreFamily, string> = { dm: 'DM', gf: 'GF' }
 const FAMILY_TOGGLE_ASSETS: Record<BjmaniaScoreFamily, string> = { dm: dmModeToggleSrc, gf: gfModeToggleSrc }
+const GITADORA_VERSION_LABELS: Record<number, string> = {
+  11: 'GALAXY WAVE DELTA',
+  10: 'GALAXY WAVE',
+  9: 'FUZZ-UP',
+  8: 'HIGH-VOLTAGE',
+  7: 'NEX+AGE',
+  6: 'EXCHAIN',
+}
 const HOT_FILTER_OPTIONS: Array<{ value: BjmaniaScoreHotFilter; label: string }> = [
   { value: 'all', label: '所有歌曲' },
   { value: 'hot', label: 'Hot' },
@@ -94,6 +102,7 @@ const b50ExportCoverSrc = ref<string | null>(null)
 const generatingB50 = ref(false)
 const showAvatarGuide = ref(false)
 const showSignOutConfirm = ref(false)
+const showVersionPanel = ref(false)
 const signingOut = ref(false)
 let stopSongCatalogUpdateListener: (() => void) | null = null
 
@@ -107,6 +116,12 @@ const selectedHotLabel = computed(() => HOT_FILTER_OPTIONS.find((option) => opti
 const selectedScoreFilterLabel = computed(() => SCORE_FILTER_OPTIONS.find((option) => option.value === selectedScoreFilter.value)?.label ?? '现有曲目')
 const selectedScoreSortLabel = computed(() => SCORE_SORT_OPTIONS.find((option) => option.value === selectedScoreSort.value)?.label ?? 'Skill-降序')
 const selectedFamilyToggleSrc = computed(() => FAMILY_TOGGLE_ASSETS[selectedFamily.value])
+const availableVersionOptions = computed(() => snapshot.value?.availableVersions.slice().sort((left, right) => right - left) ?? [])
+const selectedMdbVersion = computed(() => snapshot.value?.currentVersion ?? null)
+const versionPanelOptions = computed(() => availableVersionOptions.value.map((version) => ({
+  version,
+  label: GITADORA_VERSION_LABELS[version] ?? `VERSION ${version}`,
+})))
 
 const filteredScores = computed(() => {
   const normalizedSearch = scoreSearch.value.trim().toLowerCase()
@@ -360,7 +375,7 @@ async function restoreCachedSnapshot() {
   }
 
   try {
-    const songs = await loadSongCatalog()
+    const songs = await loadSongCatalog({ mdbVersion: cached.snapshot.currentVersion })
     applySnapshotData(cached.snapshot, songs)
     return true
   } catch {
@@ -368,7 +383,7 @@ async function restoreCachedSnapshot() {
   }
 }
 
-async function hydrateSnapshot(options?: { preserveExisting?: boolean }) {
+async function hydrateSnapshot(options?: { preserveExisting?: boolean; version?: number }) {
   const preserveExisting = options?.preserveExisting === true
   const hadExistingState = hasLocalSessionState()
 
@@ -378,10 +393,10 @@ async function hydrateSnapshot(options?: { preserveExisting?: boolean }) {
   }
 
   try {
-    const [nextSnapshot, songs] = await Promise.all([
-      runWithUnauthorizedRetry(() => loadBjmaniaGitadoraSnapshot()),
-      loadSongCatalog(),
-    ])
+    const nextSnapshot = await runWithUnauthorizedRetry(() => (
+      loadBjmaniaGitadoraSnapshot({ version: options?.version ?? snapshot.value?.currentVersion })
+    ))
+    const songs = await loadSongCatalog({ mdbVersion: nextSnapshot.currentVersion })
     applySnapshotData(nextSnapshot, songs)
     dataError.value = ''
     saveBjmaniaSkillSnapshotCache(nextSnapshot)
@@ -467,10 +482,12 @@ async function handleSignOut() {
   showProfilePanel.value = false
   showAvatarGuide.value = false
   showSignOutConfirm.value = false
+  showVersionPanel.value = false
 }
 
 function openSignOutConfirm() {
   showAvatarGuide.value = false
+  showVersionPanel.value = false
   showSignOutConfirm.value = true
 }
 
@@ -480,6 +497,23 @@ function cancelSignOut() {
   }
 
   showSignOutConfirm.value = false
+}
+
+function openVersionSelectPanel() {
+  if (loadingData.value || availableVersionOptions.value.length <= 1) {
+    return
+  }
+
+  showAvatarGuide.value = false
+  showSignOutConfirm.value = false
+  showProfilePanel.value = false
+  showVersionPanel.value = true
+}
+
+function closeVersionSelectPanel() {
+  if (!loadingData.value) {
+    showVersionPanel.value = false
+  }
 }
 
 async function confirmSignOut() {
@@ -542,7 +576,10 @@ async function handleGenerateB50() {
   showProfilePanel.value = false
   await router.push({
     name: 'skill-b50',
-    query: { family: selectedFamily.value },
+    query: {
+      family: selectedFamily.value,
+      version: selectedMdbVersion.value ?? undefined,
+    },
   })
   return
 
@@ -607,8 +644,20 @@ async function handleOpenPlayHistory() {
   showProfilePanel.value = false
   await router.push({
     name: 'skill-history',
-    query: { family: selectedFamily.value },
+    query: {
+      family: selectedFamily.value,
+      version: selectedMdbVersion.value ?? undefined,
+    },
   })
+}
+
+function selectMdbVersion(version: number) {
+  if (version === selectedMdbVersion.value || loadingData.value) {
+    return
+  }
+
+  showVersionPanel.value = false
+  void hydrateSnapshot({ preserveExisting: true, version })
 }
 
 function handleDocumentPointerDown(event: PointerEvent) {
@@ -641,12 +690,12 @@ watch(debugModeEnabled, () => {
 
 onMounted(async () => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
-  stopSongCatalogUpdateListener = onSongCatalogUpdated((songs) => {
-    if (snapshot.value) {
+  stopSongCatalogUpdateListener = onSongCatalogUpdated((songs, catalog) => {
+    if (snapshot.value && catalog.mdbVersion === snapshot.value.currentVersion) {
       applySnapshotData(snapshot.value, songs)
       void resetScoreMeasurements()
     }
-  })
+  }, { mdbVersion: 'all' })
   await bootstrapPage()
 })
 
@@ -733,16 +782,20 @@ onBeforeUnmount(() => {
       <transition name="menu-fade">
         <div v-if="showProfilePanel && isAuthenticated" class="profile-flyout-shell">
           <section class="profile-flyout">
-            <SkillProfileBoard
-              v-if="snapshot"
-              :display-name="snapshot.gitadoraProfile.name || authUser?.name || 'BJMANIA'"
-              :title="snapshot.gitadoraProfile.title || 'No title'"
-              :mode-label="FAMILY_LABELS[selectedFamily]"
-              :skill-value="activeSkillValue"
-              @generate-b50="handleGenerateB50"
-              @play-history="handleOpenPlayHistory"
-              @sign-out="openSignOutConfirm"
-            />
+            <template v-if="snapshot">
+              <SkillProfileBoard
+                :display-name="snapshot.gitadoraProfile.name || authUser?.name || 'BJMANIA'"
+                :title="snapshot.gitadoraProfile.title || 'No title'"
+                :mode-label="FAMILY_LABELS[selectedFamily]"
+                :show-version-switch="availableVersionOptions.length > 1"
+                :skill-value="activeSkillValue"
+                :version-switch-disabled="loadingData"
+                @generate-b50="handleGenerateB50"
+                @play-history="handleOpenPlayHistory"
+                @select-version="openVersionSelectPanel"
+                @sign-out="openSignOutConfirm"
+              />
+            </template>
             <div v-else class="profile-panel-card profile-panel-card--state">
               <p class="profile-panel-card__eyebrow">BJMANIA</p>
               <h2>档案读取失败</h2>
@@ -768,6 +821,42 @@ onBeforeUnmount(() => {
         ></button>
         <div class="avatar-guide__card" @click.stop>
           <p>再次点击头像可展开信息面板</p>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="sign-out-dialog">
+      <div
+        v-if="showVersionPanel"
+        class="version-select-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="version-select-dialog-title"
+        @click.self="closeVersionSelectPanel"
+      >
+        <div class="version-select-dialog__card">
+          <h2 id="version-select-dialog-title">选择版本</h2>
+          <div class="version-select-dialog__options">
+            <button
+              v-for="option in versionPanelOptions"
+              :key="option.version"
+              class="version-select-dialog__option"
+              :class="{ 'version-select-dialog__option--active': option.version === selectedMdbVersion }"
+              type="button"
+              :disabled="loadingData"
+              @click="selectMdbVersion(option.version)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+          <button
+            class="version-select-dialog__cancel"
+            type="button"
+            :disabled="loadingData"
+            @click="closeVersionSelectPanel"
+          >
+            取消
+          </button>
         </div>
       </div>
     </transition>
@@ -849,6 +938,7 @@ onBeforeUnmount(() => {
               <SkillScoreCard
                 :animate-cover-loading="!isFastScoreScrolling"
                 :card-scale="skillCardScale"
+                :mdb-version="selectedMdbVersion"
                 :row="virtualScore.item"
               />
               <section
@@ -1089,7 +1179,8 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-.sign-out-dialog {
+.sign-out-dialog,
+.version-select-dialog {
   position: fixed;
   inset: 0;
   z-index: 96;
@@ -1100,7 +1191,8 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(8px);
 }
 
-.sign-out-dialog__card {
+.sign-out-dialog__card,
+.version-select-dialog__card {
   display: grid;
   gap: 18px;
   width: min(100%, 312px);
@@ -1112,7 +1204,8 @@ onBeforeUnmount(() => {
   box-shadow: 0 24px 56px rgba(31, 16, 63, 0.24);
 }
 
-.sign-out-dialog__card h2 {
+.sign-out-dialog__card h2,
+.version-select-dialog__card h2 {
   margin: 0;
   color: #1d1741;
   font-family: var(--font-sans);
@@ -1120,6 +1213,48 @@ onBeforeUnmount(() => {
   font-weight: 700;
   line-height: 1.35;
   text-align: center;
+}
+
+.version-select-dialog__options {
+  display: grid;
+  gap: 8px;
+}
+
+.version-select-dialog__option,
+.version-select-dialog__cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid rgba(79, 55, 138, 0.12);
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.version-select-dialog__option {
+  background: rgba(79, 55, 138, 0.08);
+  color: #4f378a;
+}
+
+.version-select-dialog__option--active {
+  background: #4f378a;
+  color: #ffffff;
+  border-color: #4f378a;
+}
+
+.version-select-dialog__cancel {
+  background: transparent;
+  color: rgba(29, 23, 65, 0.72);
+}
+
+.version-select-dialog__option:disabled,
+.version-select-dialog__cancel:disabled {
+  opacity: 0.68;
+  cursor: default;
 }
 
 .sign-out-dialog__actions {
@@ -1160,7 +1295,9 @@ onBeforeUnmount(() => {
 }
 
 .sign-out-dialog-enter-active .sign-out-dialog__card,
-.sign-out-dialog-leave-active .sign-out-dialog__card {
+.sign-out-dialog-enter-active .version-select-dialog__card,
+.sign-out-dialog-leave-active .sign-out-dialog__card,
+.sign-out-dialog-leave-active .version-select-dialog__card {
   transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), opacity 0.16s ease;
 }
 
@@ -1170,7 +1307,9 @@ onBeforeUnmount(() => {
 }
 
 .sign-out-dialog-enter-from .sign-out-dialog__card,
-.sign-out-dialog-leave-to .sign-out-dialog__card {
+.sign-out-dialog-enter-from .version-select-dialog__card,
+.sign-out-dialog-leave-to .sign-out-dialog__card,
+.sign-out-dialog-leave-to .version-select-dialog__card {
   opacity: 0;
   transform: translateY(12px) scale(0.98);
 }
@@ -1342,6 +1481,8 @@ onBeforeUnmount(() => {
 
 .profile-flyout {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   justify-content: flex-end;
   width: min(100%, 402px);
   margin: 0 auto;

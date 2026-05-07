@@ -33,6 +33,7 @@ import {
   getStringField,
   parseProtoMessage,
 } from './protobuf'
+import { resolveAvailableLocalMdbVersions } from '../song-catalog'
 
 const GITADORA_GAME_CODE = 'M32'
 const BJMANIA_ASSETS_MDB_BASE_URL = 'https://assets.bjmania.com/mdb'
@@ -315,17 +316,23 @@ export async function getBjmaniaMusicDb(options: {
   return loader
 }
 
-export async function loadBjmaniaGitadoraSnapshot() {
+export async function loadBjmaniaGitadoraSnapshot(options?: { version?: number | null }) {
   const authUser = await getBjmaniaAuthMe()
   const profiles = await getBjmaniaProfiles()
   const gitadoraGame = profiles.profiles.find((profile) => profile.gameCode === GITADORA_GAME_CODE)
-  const currentVersion = gitadoraGame?.gameVersions.reduce<number | null>((latestVersion, version) => {
-    if (!Number.isFinite(version)) {
-      return latestVersion
-    }
-
-    return latestVersion === null ? version : Math.max(latestVersion, version)
-  }, null)
+  const availableVersions = gitadoraGame
+    ? await resolveAvailableLocalMdbVersions(gitadoraGame.gameVersions)
+    : []
+  const requestedVersion = options?.version
+  const currentVersion = (
+    typeof requestedVersion === 'number' &&
+    Number.isFinite(requestedVersion) &&
+    availableVersions.includes(requestedVersion)
+  )
+    ? requestedVersion
+    : availableVersions.reduce<number | null>((latestVersion, version) => (
+        latestVersion === null ? version : Math.max(latestVersion, version)
+      ), null)
 
   if (typeof currentVersion !== 'number') {
     throw new Error('Could not resolve the current GITADORA version from GetProfiles')
@@ -341,6 +348,7 @@ export async function loadBjmaniaGitadoraSnapshot() {
   return {
     authUser,
     currentVersion,
+    availableVersions,
     profiles,
     gitadoraProfile,
     bestScores,

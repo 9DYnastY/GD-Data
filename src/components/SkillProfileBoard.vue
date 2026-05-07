@@ -5,22 +5,26 @@ import b50ButtonSrc from '../assets/skill-page/Player_Board/b50_button.svg'
 import logoutButtonSrc from '../assets/skill-page/Player_Board/logout_button.svg'
 import playHistoryButtonSrc from '../assets/skill-page/Player_Board/playhistory_button.svg'
 import skillIconSrc from '../assets/skill-page/Player_Board/Skill_icon.svg'
+import swapHorizSrc from '../assets/skill-page/Player_Board/swap_horiz.svg'
 import { resolveSkillToneStyle, splitSkillValueText } from '../lib/skill-tone'
 
 const BOARD_WIDTH = 263
-const BOARD_HEIGHT = 202
+const BOARD_HEIGHT = 295
 
 const props = defineProps<{
   displayName: string
   title: string
   modeLabel: string
   skillValue: string
+  showVersionSwitch?: boolean
+  versionSwitchDisabled?: boolean
 }>()
 
 defineEmits<{
   generateB50: []
   playHistory: []
   signOut: []
+  selectVersion: []
 }>()
 
 const boardRoot = ref<HTMLElement | null>(null)
@@ -99,6 +103,19 @@ onBeforeUnmount(() => {
             </span>
           </strong>
         </div>
+
+        <button
+          v-if="props.showVersionSwitch"
+          class="skill-profile-board__action skill-profile-board__action--version"
+          type="button"
+          aria-label="选择版本"
+          title="选择版本"
+          :disabled="props.versionSwitchDisabled"
+          @click="$emit('selectVersion')"
+        >
+          <img :src="swapHorizSrc" alt="" aria-hidden="true" />
+          <span>版本切换</span>
+        </button>
 
         <button
           class="skill-profile-board__action skill-profile-board__action--b50"
@@ -298,6 +315,12 @@ onBeforeUnmount(() => {
   transform-origin: top right;
 }
 
+.skill-profile-board__action:disabled {
+  cursor: wait;
+  filter: grayscale(0.35);
+  opacity: 0.72;
+}
+
 .skill-profile-board__action img {
   flex: none;
   width: 25px;
@@ -314,18 +337,23 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.skill-profile-board__action--b50 {
+.skill-profile-board__action--version {
   top: 105px;
   left: 155px;
 }
 
+.skill-profile-board__action--b50 {
+  top: 153px;
+  left: 155px;
+}
+
 .skill-profile-board__action--history {
-  top: 150px;
+  top: 201px;
   left: 155px;
 }
 
 .skill-profile-board__action--logout {
-  top: 195px;
+  top: 249px;
   left: 155px;
 }
 </style>

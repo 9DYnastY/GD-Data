@@ -2,8 +2,8 @@
 import { computed, type CSSProperties } from 'vue'
 import pageBackgroundSrc from '../assets/b50-page/Page_B50/b50_background.png'
 import decorationBackgroundSrc from '../assets/b50-page/Page_B50/decoration_background.png'
-import versionLogoSrc from '../assets/b50-page/Page_B50/version_logo.png'
 import { B50_POSTER_HEIGHT, B50_POSTER_WIDTH, formatB50SkillTotal, getB50RowKey } from '../lib/b50'
+import { resolveGitadoraMdbVersionLogo } from '../lib/version-logos'
 import type { BjmaniaScoreFamily, BjmaniaScoreListItem } from '../types/bjmania'
 import B50PlayerBoard from './B50PlayerBoard.vue'
 import B50ScoreCard from './B50ScoreCard.vue'
@@ -16,6 +16,7 @@ const props = defineProps<{
   hotRows: BjmaniaScoreListItem[]
   otherRows: BjmaniaScoreListItem[]
   coverMap?: Record<string, string | null>
+  mdbVersion?: number | null
   playerNameToneStyle?: CSSProperties | null
 }>()
 
@@ -24,6 +25,19 @@ const POSTER_TEXT_TOP = {
   other: 240,
   mode: 160,
 } as const
+const VERSION_LOGO_BOX = {
+  width: 561,
+  height: 201,
+} as const
+const VERSION_LOGO_SIZE_BY_MDB_VERSION: Record<number, { width: number; height: number }> = {
+  6: { width: 962, height: 308 },
+  7: { width: 252, height: 104 },
+  8: { width: 980, height: 320 },
+  9: { width: 2000, height: 1021 },
+  10: { width: 1024, height: 367 },
+  11: { width: 546, height: 305 },
+}
+const FALLBACK_VERSION_LOGO_SIZE = VERSION_LOGO_SIZE_BY_MDB_VERSION[10]
 
 function padRows(rows: BjmaniaScoreListItem[]) {
   return Array.from({ length: 25 }, (_, index) => rows[index] ?? null)
@@ -39,6 +53,22 @@ const hotTotalText = computed(() => formatB50SkillTotal(props.hotRows))
 const otherTotalText = computed(() => formatB50SkillTotal(props.otherRows))
 const gameLabel = computed(() => (props.family === 'dm' ? 'Drummania' : 'GuitarFreaks'))
 const modeLabelLeft = computed(() => (props.family === 'gf' ? 2235 : 2265))
+const modeLabelTop = computed(() => (props.mdbVersion === 7 ? 232 : POSTER_TEXT_TOP.mode))
+const versionLogoSrc = computed(() => resolveGitadoraMdbVersionLogo(props.mdbVersion))
+const versionLogoStyle = computed(() => {
+  const naturalSize = props.mdbVersion
+    ? VERSION_LOGO_SIZE_BY_MDB_VERSION[props.mdbVersion] ?? FALLBACK_VERSION_LOGO_SIZE
+    : FALLBACK_VERSION_LOGO_SIZE
+  const scale = Math.min(
+    VERSION_LOGO_BOX.width / naturalSize.width,
+    VERSION_LOGO_BOX.height / naturalSize.height,
+  )
+
+  return {
+    width: `${Math.round(naturalSize.width * scale)}px`,
+    height: `${Math.round(naturalSize.height * scale)}px`,
+  }
+})
 </script>
 
 <template>
@@ -77,11 +107,11 @@ const modeLabelLeft = computed(() => (props.family === 'gf' ? 2235 : 2265))
     </div>
 
     <div class="b50-poster__version-logo">
-      <img :src="versionLogoSrc" alt="" aria-hidden="true" />
+      <img :src="versionLogoSrc" :style="versionLogoStyle" alt="" aria-hidden="true" />
     </div>
     <div
       class="b50-poster__mode-label"
-      :style="{ top: `${POSTER_TEXT_TOP.mode}px`, left: `${modeLabelLeft}px` }"
+      :style="{ top: `${modeLabelTop}px`, left: `${modeLabelLeft}px` }"
     >
       <span>{{ gameLabel }}</span>
     </div>
@@ -127,8 +157,7 @@ const modeLabelLeft = computed(() => (props.family === 'gf' ? 2235 : 2265))
   user-select: none;
 }
 
-.b50-poster__background,
-.b50-poster__version-logo img {
+.b50-poster__background {
   object-fit: cover;
 }
 
@@ -199,13 +228,15 @@ const modeLabelLeft = computed(() => (props.family === 'gf' ? 2235 : 2265))
 .b50-poster__version-logo {
   top: 23px;
   left: 2196px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 561px;
   height: 201px;
 }
 
 .b50-poster__version-logo img {
-  width: 100%;
-  height: 100%;
+  flex: none;
 }
 
 .b50-poster__mode-label {

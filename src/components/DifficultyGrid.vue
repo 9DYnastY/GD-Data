@@ -17,7 +17,6 @@ import type { DifficultySlot, InstrumentDifficulty, InstrumentKey, LevelKey } fr
 const props = defineProps<{
   instruments: InstrumentDifficulty[]
   compact?: boolean
-  showNoteCount?: boolean
   selectedInstrument?: InstrumentKey
 }>()
 
@@ -137,9 +136,6 @@ function compactCellBackground(level: LevelKey) {
         >
           <p class="detail-grid__label">{{ level.label }}</p>
           <p class="detail-grid__value">{{ displayDifficultyText(level) }}</p>
-          <p v-if="showNoteCount" class="detail-grid__notes">
-            Notes {{ level.noteCountText }}
-          </p>
         </article>
       </div>
     </section>
@@ -220,8 +216,7 @@ function compactCellBackground(level: LevelKey) {
 .detail-grid__header h3,
 .detail-grid__max,
 .detail-grid__label,
-.detail-grid__value,
-.detail-grid__notes {
+.detail-grid__value {
   margin: 0;
 }
 
@@ -266,12 +261,6 @@ function compactCellBackground(level: LevelKey) {
   font-family: var(--font-display);
   font-size: 1rem;
   font-weight: 700;
-}
-
-.detail-grid__notes {
-  margin-top: 6px;
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 0.7rem;
 }
 
 @media (max-width: 720px) {

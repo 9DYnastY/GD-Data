@@ -42,9 +42,6 @@ const MAIN_ROUTE_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)'
 const route = useRoute()
 const router = useRouter()
 const showBottomNav = computed(() => route.meta.showBottomNav === true)
-const showSharedBackground = computed(() => (
-  route.meta.showBottomNav === true || route.meta.showSharedBackground === true
-))
 const exitToastVisible = ref(false)
 const backgroundVideoRef = ref<HTMLVideoElement | null>(null)
 const backgroundVideoReady = ref(false)
@@ -329,7 +326,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="showSharedBackground" class="app-background" aria-hidden="true">
+  <div class="app-background" aria-hidden="true">
     <img
       class="app-background__poster"
       :class="{ 'app-background__poster--hidden': backgroundVideoReady }"

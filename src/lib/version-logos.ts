@@ -60,6 +60,14 @@ const GD_LOGO_MAP: Record<number, string> = {
 }
 
 const FALLBACK_LOGO = '/version-logos/GD_GALAXY_WAVE.png'
+const MDB_VERSION_TO_GD_VERSION: Record<number, number> = {
+  6: 25,
+  7: 26,
+  8: 27,
+  9: 28,
+  10: 29,
+  11: 30,
+}
 
 export interface VersionLogoEntry {
   key: string
@@ -90,6 +98,11 @@ export function resolveInstrumentVersionLogo(versionKey: string, instrument: Ins
   }
 
   return gfIndex !== null ? (GF_LOGO_MAP[gfIndex] ?? FALLBACK_LOGO) : FALLBACK_LOGO
+}
+
+export function resolveGitadoraMdbVersionLogo(mdbVersion: number | null | undefined) {
+  const gdVersion = typeof mdbVersion === 'number' ? MDB_VERSION_TO_GD_VERSION[mdbVersion] : null
+  return gdVersion ? (GD_LOGO_MAP[gdVersion] ?? FALLBACK_LOGO) : FALLBACK_LOGO
 }
 
 export function resolveSongVersionLogos(versionKey: string): VersionLogoEntry[] {

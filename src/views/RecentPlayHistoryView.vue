@@ -54,6 +54,11 @@ let stopSongCatalogUpdateListener: (() => void) | null = null
 const selectedFamily = computed<BjmaniaScoreFamily>(() => (
   route.query.family === 'gf' ? 'gf' : 'dm'
 ))
+const requestedMdbVersion = computed(() => {
+  const rawVersion = Array.isArray(route.query.version) ? route.query.version[0] : route.query.version
+  const parsedVersion = rawVersion ? Number(rawVersion) : null
+  return parsedVersion && Number.isFinite(parsedVersion) ? parsedVersion : null
+})
 const selectedFamilyLabel = computed(() => selectedFamily.value.toUpperCase())
 const selectedFamilyToggleSrc = computed(() => FAMILY_TOGGLE_ASSETS[selectedFamily.value])
 const filteredRows = computed(() => (
@@ -96,13 +101,13 @@ function applySnapshot(nextSnapshot: BjmaniaGitadoraSnapshot, songs: SongViewMod
 }
 
 async function restoreCachedSnapshot() {
-  const cached = loadBjmaniaSkillSnapshotCache()
+  const cached = loadBjmaniaSkillSnapshotCache({ version: requestedMdbVersion.value })
 
   if (!cached) {
     return false
   }
 
-  const songs = await loadSongCatalog()
+  const songs = await loadSongCatalog({ mdbVersion: cached.snapshot.currentVersion })
   applySnapshot(cached.snapshot, songs)
   loadedFromCache.value = true
   return true
@@ -112,10 +117,10 @@ async function hydrateLiveSnapshot() {
   refreshing.value = true
 
   try {
-    const [nextSnapshot, songs] = await Promise.all([
-      loadBjmaniaGitadoraSnapshot(),
-      loadSongCatalog(),
-    ])
+    const nextSnapshot = await loadBjmaniaGitadoraSnapshot({
+      version: requestedMdbVersion.value ?? snapshot.value?.currentVersion,
+    })
+    const songs = await loadSongCatalog({ mdbVersion: nextSnapshot.currentVersion })
     applySnapshot(nextSnapshot, songs)
     saveBjmaniaSkillSnapshotCache(nextSnapshot)
     loadedFromCache.value = false
@@ -229,11 +234,11 @@ function updateViewportWidth() {
 onMounted(() => {
   updateViewportWidth()
   window.addEventListener('resize', updateViewportWidth, { passive: true })
-  stopSongCatalogUpdateListener = onSongCatalogUpdated((songs) => {
-    if (snapshot.value) {
+  stopSongCatalogUpdateListener = onSongCatalogUpdated((songs, catalog) => {
+    if (snapshot.value && catalog.mdbVersion === snapshot.value.currentVersion) {
       applySnapshot(snapshot.value, songs)
     }
-  })
+  }, { mdbVersion: 'all' })
   void bootstrapPage()
 })
 

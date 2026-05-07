@@ -68,6 +68,12 @@ function syncSelectedInstrumentFromRoute() {
   }
 }
 
+function resolveRouteMdbVersion() {
+  const rawVersion = Array.isArray(route.query.version) ? route.query.version[0] : route.query.version
+  const parsedVersion = rawVersion ? Number(rawVersion) : null
+  return parsedVersion && Number.isFinite(parsedVersion) ? parsedVersion : null
+}
+
 function orderedLevels(levels: DifficultySlot[]) {
   const levelOrder: LevelKey[] = ['master', 'extreme', 'advanced', 'basic']
   return levelOrder
@@ -126,7 +132,7 @@ function getInstrumentButtonClass(instrument: InstrumentDifficulty) {
 }
 
 function syncCachedScoreRows(currentSong: SongViewModel) {
-  const cached = loadBjmaniaSkillSnapshotCache()
+  const cached = loadBjmaniaSkillSnapshotCache({ version: resolveRouteMdbVersion() })
 
   if (!cached) {
     scoreRows.value = []
@@ -154,7 +160,7 @@ async function loadCurrentSong() {
   }
 
   try {
-    const result = await loadSongByMusicId(musicId)
+    const result = await loadSongByMusicId(musicId, { mdbVersion: resolveRouteMdbVersion() })
 
     if (!result) {
       errorMessage.value = `没有找到 Music ID ${musicId}`
@@ -603,7 +609,7 @@ watch(
   { immediate: true },
 )
 
-watch(() => route.params.musicId, loadCurrentSong)
+watch(() => [route.params.musicId, route.query.version], loadCurrentSong)
 
 watch(
   () => [song.value?.musicId, loading.value] as const,
@@ -633,7 +639,7 @@ watch(coverLightboxOpen, (isOpen) => {
 onMounted(() => {
   stopSongCatalogUpdateListener = onSongCatalogUpdated(() => {
     void loadCurrentSong()
-  })
+  }, { mdbVersion: 'all' })
   void loadCurrentSong()
 })
 

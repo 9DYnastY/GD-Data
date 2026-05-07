@@ -21,6 +21,7 @@ const props = defineProps<{
   row: BjmaniaScoreListItem
   cardScale?: number
   animateCoverLoading?: boolean
+  mdbVersion?: number | null
 }>()
 
 const LEVEL_COLORS: Record<LevelKey, string> = {
@@ -110,7 +111,7 @@ const skillValuePadding = computed(() => buildSkillIntegerPadding(skillValuePart
     :to="{
       name: 'song-detail',
       params: { musicId: row.musicId },
-      query: { instrument: row.instrument },
+      query: { instrument: row.instrument, version: props.mdbVersion ?? undefined },
     }"
     :aria-label="`查看 ${title} 的歌曲详情`"
   >

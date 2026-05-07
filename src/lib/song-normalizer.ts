@@ -142,13 +142,11 @@ function formatDifficultyValue(rawValue: number | null | undefined): { value: nu
 function createDifficultySlots(
   instrumentIndex: number,
   difficultyValues: number[] | null,
-  noteCountValues: number[] | null,
 ): DifficultySlot[] {
   const baseOffset = instrumentIndex * 5
 
   return LEVEL_ORDER.map(({ key, label }, levelIndex) => {
     const difficultyRaw = difficultyValues?.[baseOffset + levelIndex + 1] ?? null
-    const noteCountRaw = noteCountValues?.[baseOffset + levelIndex + 1] ?? null
     const normalizedDifficulty = formatDifficultyValue(difficultyRaw)
 
     return {
@@ -156,8 +154,6 @@ function createDifficultySlots(
       label,
       difficulty: normalizedDifficulty.value,
       difficultyText: normalizedDifficulty.text,
-      noteCount: noteCountRaw && noteCountRaw > 0 ? noteCountRaw : null,
-      noteCountText: noteCountRaw && noteCountRaw > 0 ? String(noteCountRaw) : '--',
       available: normalizedDifficulty.value !== null,
     }
   })
@@ -168,7 +164,6 @@ function createInstrumentDifficulties(rawSong: RawSong): InstrumentDifficulty[] 
     const levels = createDifficultySlots(
       instrumentIndex,
       rawSong.xg_diff_list ?? null,
-      rawSong.remy_notecount_list ?? null,
     )
     const maxDifficulty = levels.reduce<number | null>((currentMax, level) => {
       if (level.difficulty === null) {

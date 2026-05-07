@@ -26,7 +26,6 @@ export interface RawSong {
   music_type: number | null
   genre: number | null
   xg_diff_list: number[] | null
-  remy_notecount_list: number[] | null
   is_classic_seq: number | boolean | null
   is_remaster: number | boolean | null
   b_long: boolean | null
@@ -43,8 +42,6 @@ export interface DifficultySlot {
   label: string
   difficulty: number | null
   difficultyText: string
-  noteCount: number | null
-  noteCountText: string
   available: boolean
 }
 

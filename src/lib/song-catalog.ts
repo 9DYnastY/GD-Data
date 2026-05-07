@@ -1,20 +1,42 @@
 import { computed, ref } from 'vue'
+import { parseMdbBinary } from './mdb-parser'
 import { normalizeSong } from './song-normalizer'
-import type { SongCatalogResponse, SongViewModel } from '../types/song'
+import type { RawSong, SongCatalogResponse, SongViewModel } from '../types/song'
 
-const EMBEDDED_CATALOG_URL = '/song_list.json'
-const SONG_LIST_MANIFEST_URL = 'https://gitadora.selundine.top/songlist/latest/songlist_version.json'
-const SONG_LIST_MANIFEST_SCHEMA_VERSION = 1
+const MDB_MANIFEST_URL = '/mdb/m32_manifest.json'
+const EMBEDDED_ENRICHMENT_URL = '/song_enrichment.json'
+const REMOTE_ENRICHMENT_URL = 'https://gitadora.selundine.top/songlist/latest/song_enrichment.json'
 const SONG_LIST_CACHE_DB_NAME = 'gddata-song-list'
-const SONG_LIST_CACHE_DB_VERSION = 1
+const SONG_LIST_CACHE_DB_VERSION = 2
 const SONG_LIST_CACHE_STORE = 'catalog'
-const SONG_LIST_CACHE_KEY = 'active'
-const SONG_LIST_FETCH_TIMEOUT_MS = 10000
+const SONG_LIST_CACHE_KEY = 'enrichment'
 const SONG_LIST_DOWNLOAD_TIMEOUT_MS = 120000
 const SONG_LIST_SUCCESS_CLOSE_DELAY_MS = 1800
 
-type SongCatalogSource = 'cache' | 'embedded'
 type SongListUpdateState = 'idle' | 'checking' | 'downloading' | 'updated' | 'error'
+type EnrichmentSource = 'cache' | 'embedded' | 'remote'
+type SongCatalogListenerTarget = number | 'all' | 'default'
+
+interface MdbVersionManifest {
+  schemaVersion: 1
+  game: 'M32'
+  latest: number
+  versions: number[]
+  files: Record<string, string>
+}
+
+type SongEnrichmentRecord = Partial<Pick<
+  RawSong,
+  'remy_title' | 'remy_artist' | 'remy_url' | 'remy_imageUrl' | 'remy_length' | 'remy_bpm'
+>>
+
+interface SongEnrichmentPayload {
+  schemaVersion: 1
+  catalogVersion: string
+  publishedAt: string | null
+  notes: string[]
+  records: Record<string, SongEnrichmentRecord>
+}
 
 export interface SongListVersionManifest {
   schemaVersion: 1
@@ -26,11 +48,11 @@ export interface SongListVersionManifest {
   notes: string[]
 }
 
-interface CachedSongListRecord {
+interface CachedSongEnrichmentRecord {
   id: typeof SONG_LIST_CACHE_KEY
   schemaVersion: 1
   catalogVersion: string
-  publishedAt: string
+  publishedAt: string | null
   dataUrl: string
   dataSize: number
   dataSha256: string
@@ -38,14 +60,28 @@ interface CachedSongListRecord {
   savedAt: number
 }
 
-interface ActiveSongCatalog {
-  source: SongCatalogSource
-  catalogVersion: string | null
+interface ActiveEnrichment {
+  source: EnrichmentSource
+  catalogVersion: string
   publishedAt: string | null
   dataUrl: string | null
   dataSize: number
   dataSha256: string
   payloadText: string
+  payload: SongEnrichmentPayload
+}
+
+export interface ActiveSongCatalog {
+  source: 'local-mdb'
+  mdbVersion: number
+  mdbUrl: string
+  isDefaultVersion: boolean
+  enrichmentSource: EnrichmentSource
+  catalogVersion: string
+  publishedAt: string | null
+  dataUrl: string | null
+  dataSize: number
+  dataSha256: string
   songs: SongViewModel[]
 }
 
@@ -58,10 +94,14 @@ type SongCatalogListener = (songs: SongViewModel[], catalog: ActiveSongCatalog) 
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
-const songCatalogListeners = new Set<SongCatalogListener>()
+const songCatalogListeners = new Map<SongCatalogListener, SongCatalogListenerTarget>()
+const catalogPromiseCache = new Map<number, Promise<ActiveSongCatalog>>()
+const activeCatalogs = new Map<number, ActiveSongCatalog>()
+const loadedCatalogVersions = new Set<number>()
 
-let catalogPromise: Promise<ActiveSongCatalog> | null = null
-let activeCatalog: ActiveSongCatalog | null = null
+let mdbManifestPromise: Promise<MdbVersionManifest> | null = null
+let enrichmentPromise: Promise<ActiveEnrichment> | null = null
+let activeEnrichment: ActiveEnrichment | null = null
 let activeUpdatePromise: Promise<SongListAvailableUpdate | null> | null = null
 let autoCloseTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -91,13 +131,13 @@ export const songListUpdateProgressRatio = computed(() => {
 export const songListUpdateStatusMessage = computed(() => {
   switch (songListUpdateState.value) {
     case 'checking':
-      return '正在检查曲库更新'
+      return '正在检查曲库增强信息'
     case 'downloading':
-      return '正在下载曲库'
+      return '正在下载曲库增强信息'
     case 'updated':
-      return '曲库已更新'
+      return '曲库增强信息已更新'
     case 'error':
-      return '曲库更新失败'
+      return '曲库增强信息更新失败'
     case 'idle':
     default:
       return ''
@@ -157,6 +197,11 @@ function readString(payload: Record<string, unknown>, key: string) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function readNullableString(payload: Record<string, unknown>, key: string) {
+  const value = payload[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
 function normalizeNotes(value: unknown) {
   if (!Array.isArray(value)) {
     return []
@@ -165,50 +210,137 @@ function normalizeNotes(value: unknown) {
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
 }
 
-function parseSongListManifest(value: unknown): SongListVersionManifest {
+function parseMdbManifest(value: unknown): MdbVersionManifest {
   if (!isRecord(value)) {
-    throw new Error('曲库版本信息格式不正确。')
+    throw new Error('本地 MDB 版本信息格式不正确。')
   }
 
   const schemaVersion = parseNumber(value.schemaVersion)
-  const catalogVersion = readString(value, 'catalogVersion')
-  const publishedAt = readString(value, 'publishedAt')
-  const dataUrl = readString(value, 'dataUrl')
-  const dataSize = parseNumber(value.dataSize)
-  const dataSha256 = readString(value, 'dataSha256').toLowerCase()
-  const notes = normalizeNotes(value.notes)
+  const game = readString(value, 'game')
+  const latest = parseNumber(value.latest)
+  const versions = Array.isArray(value.versions)
+    ? value.versions.map(parseNumber).filter((version): version is number => Number.isFinite(version))
+    : []
+  const files = isRecord(value.files)
+    ? Object.fromEntries(
+        Object.entries(value.files).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+      )
+    : {}
 
-  if (schemaVersion !== SONG_LIST_MANIFEST_SCHEMA_VERSION) {
-    throw new Error('曲库版本信息不兼容。')
+  if (schemaVersion !== 1 || game !== 'M32' || !Number.isFinite(latest) || versions.length === 0) {
+    throw new Error('本地 MDB 版本信息缺少必要字段。')
   }
 
-  if (!catalogVersion || !publishedAt || !dataUrl || !dataSha256 || dataSize === null || dataSize <= 0) {
-    throw new Error('曲库版本信息缺少必要字段。')
-  }
+  versions.forEach((version) => {
+    if (!files[String(version)]) {
+      throw new Error(`本地 MDB 版本 ${version} 缺少文件路径。`)
+    }
+  })
 
   return {
-    schemaVersion: SONG_LIST_MANIFEST_SCHEMA_VERSION,
-    catalogVersion,
-    publishedAt,
-    dataUrl,
-    dataSize,
-    dataSha256,
-    notes,
+    schemaVersion: 1,
+    game: 'M32',
+    latest: latest as number,
+    versions: [...new Set(versions)].sort((left, right) => left - right),
+    files,
   }
 }
 
-function parseSongCatalogPayload(text: string): SongCatalogResponse {
-  const payload = JSON.parse(text) as unknown
+async function loadMdbManifest() {
+  if (!mdbManifestPromise) {
+    mdbManifestPromise = fetch(MDB_MANIFEST_URL).then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`无法加载本地 MDB 版本信息：${response.status}`)
+      }
 
-  if (!isRecord(payload) || !Array.isArray(payload.mdb_data)) {
-    throw new Error('曲库数据格式不正确。')
+      return parseMdbManifest(await response.json())
+    })
   }
 
-  return payload as unknown as SongCatalogResponse
+  return await mdbManifestPromise
 }
 
-function normalizeCatalogSongs(payload: SongCatalogResponse) {
-  return payload.mdb_data.map((song, index) => normalizeSong(song, index))
+function resolveMdbVersion(manifest: MdbVersionManifest, requestedVersion?: number | null) {
+  if (typeof requestedVersion === 'number' && Number.isFinite(requestedVersion)) {
+    if (!manifest.versions.includes(requestedVersion)) {
+      throw new Error(`当前安装包不支持 GITADORA 版本 ${requestedVersion}。`)
+    }
+
+    return requestedVersion
+  }
+
+  return manifest.latest
+}
+
+export async function getLocalMdbVersions() {
+  const manifest = await loadMdbManifest()
+  return [...manifest.versions]
+}
+
+export async function resolveAvailableLocalMdbVersions(gameVersions: number[]) {
+  const manifest = await loadMdbManifest()
+  const ownedVersions = new Set(gameVersions.filter((version) => Number.isFinite(version)))
+  return manifest.versions.filter((version) => ownedVersions.has(version))
+}
+
+export async function getDefaultLocalMdbVersion() {
+  const manifest = await loadMdbManifest()
+  return manifest.latest
+}
+
+function parseSongEnrichmentRecord(value: unknown): SongEnrichmentRecord | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const record: SongEnrichmentRecord = {}
+  const remyTitle = readNullableString(value, 'remy_title')
+  const remyArtist = readNullableString(value, 'remy_artist')
+  const remyUrl = readNullableString(value, 'remy_url')
+  const remyImageUrl = readNullableString(value, 'remy_imageUrl')
+  const remyLength = readNullableString(value, 'remy_length')
+  const remyBpm = parseNumber(value.remy_bpm)
+
+  if (remyTitle) record.remy_title = remyTitle
+  if (remyArtist) record.remy_artist = remyArtist
+  if (remyUrl) record.remy_url = remyUrl
+  if (remyImageUrl) record.remy_imageUrl = remyImageUrl
+  if (remyLength) record.remy_length = remyLength
+  if (remyBpm !== null) record.remy_bpm = remyBpm
+
+  return Object.keys(record).length > 0 ? record : null
+}
+
+function parseSongEnrichmentPayload(value: unknown): SongEnrichmentPayload {
+  if (!isRecord(value) || !isRecord(value.records)) {
+    throw new Error('曲库增强信息格式不正确。')
+  }
+
+  const schemaVersion = parseNumber(value.schemaVersion)
+
+  if (schemaVersion !== 1) {
+    throw new Error('曲库增强信息版本不兼容。')
+  }
+
+  const records: Record<string, SongEnrichmentRecord> = {}
+  Object.entries(value.records).forEach(([musicId, rawRecord]) => {
+    if (!/^\d+$/.test(musicId)) {
+      return
+    }
+
+    const record = parseSongEnrichmentRecord(rawRecord)
+    if (record) {
+      records[musicId] = record
+    }
+  })
+
+  return {
+    schemaVersion: 1,
+    catalogVersion: readString(value, 'catalogVersion') || 'unknown',
+    publishedAt: readNullableString(value, 'publishedAt'),
+    notes: normalizeNotes(value.notes),
+    records,
+  }
 }
 
 async function sha256Hex(bytes: Uint8Array) {
@@ -223,28 +355,26 @@ async function sha256Hex(bytes: Uint8Array) {
     .join('')
 }
 
-async function buildCatalogFromText(options: {
+async function buildEnrichmentFromText(options: {
   payloadText: string
-  source: SongCatalogSource
-  catalogVersion?: string | null
-  publishedAt?: string | null
+  source: EnrichmentSource
   dataUrl?: string | null
   dataSha256?: string | null
 }) {
   const payloadBytes = textEncoder.encode(options.payloadText)
+  const payload = parseSongEnrichmentPayload(JSON.parse(options.payloadText) as unknown)
   const dataSha256 = options.dataSha256 ?? await sha256Hex(payloadBytes)
-  const payload = parseSongCatalogPayload(options.payloadText)
 
   return {
     source: options.source,
-    catalogVersion: options.catalogVersion ?? null,
-    publishedAt: options.publishedAt ?? null,
+    catalogVersion: payload.catalogVersion,
+    publishedAt: payload.publishedAt,
     dataUrl: options.dataUrl ?? null,
     dataSize: payloadBytes.byteLength,
     dataSha256,
     payloadText: options.payloadText,
-    songs: normalizeCatalogSongs(payload),
-  } satisfies ActiveSongCatalog
+    payload,
+  } satisfies ActiveEnrichment
 }
 
 function openSongListCacheDb() {
@@ -267,18 +397,18 @@ function openSongListCacheDb() {
   })
 }
 
-async function readCachedSongListRecord() {
+async function readCachedEnrichmentRecord() {
   const db = await openSongListCacheDb()
 
   if (!db) {
     return null
   }
 
-  return await new Promise<CachedSongListRecord | null>((resolve, reject) => {
+  return await new Promise<CachedSongEnrichmentRecord | null>((resolve, reject) => {
     const transaction = db.transaction(SONG_LIST_CACHE_STORE, 'readonly')
     const request = transaction.objectStore(SONG_LIST_CACHE_STORE).get(SONG_LIST_CACHE_KEY)
 
-    request.onsuccess = () => resolve((request.result as CachedSongListRecord | undefined) ?? null)
+    request.onsuccess = () => resolve((request.result as CachedSongEnrichmentRecord | undefined) ?? null)
     request.onerror = () => reject(request.error)
     transaction.oncomplete = () => db.close()
     transaction.onerror = () => {
@@ -288,7 +418,7 @@ async function readCachedSongListRecord() {
   })
 }
 
-async function writeCachedSongListRecord(record: CachedSongListRecord) {
+async function writeCachedEnrichmentRecord(record: CachedSongEnrichmentRecord) {
   const db = await openSongListCacheDb()
 
   if (!db) {
@@ -309,7 +439,7 @@ async function writeCachedSongListRecord(record: CachedSongListRecord) {
   })
 }
 
-async function clearCachedSongListRecord() {
+async function clearCachedEnrichmentRecord() {
   const db = await openSongListCacheDb()
 
   if (!db) {
@@ -330,16 +460,16 @@ async function clearCachedSongListRecord() {
   })
 }
 
-function isValidCachedSongListRecord(record: unknown): record is CachedSongListRecord {
+function isValidCachedEnrichmentRecord(record: unknown): record is CachedSongEnrichmentRecord {
   if (!isRecord(record)) {
     return false
   }
 
   return (
     record.id === SONG_LIST_CACHE_KEY &&
-    record.schemaVersion === SONG_LIST_MANIFEST_SCHEMA_VERSION &&
+    record.schemaVersion === 1 &&
     typeof record.catalogVersion === 'string' &&
-    typeof record.publishedAt === 'string' &&
+    (typeof record.publishedAt === 'string' || record.publishedAt === null) &&
     typeof record.dataUrl === 'string' &&
     typeof record.dataSize === 'number' &&
     typeof record.dataSha256 === 'string' &&
@@ -347,10 +477,10 @@ function isValidCachedSongListRecord(record: unknown): record is CachedSongListR
   )
 }
 
-async function loadCachedCatalog() {
-  const record = await readCachedSongListRecord()
+async function loadCachedEnrichment() {
+  const record = await readCachedEnrichmentRecord()
 
-  if (!isValidCachedSongListRecord(record)) {
+  if (!isValidCachedEnrichmentRecord(record)) {
     return null
   }
 
@@ -359,65 +489,161 @@ async function loadCachedCatalog() {
     const actualSha256 = await sha256Hex(payloadBytes)
 
     if (actualSha256 !== record.dataSha256.toLowerCase() || payloadBytes.byteLength !== record.dataSize) {
-      throw new Error('Cached song list validation failed.')
+      throw new Error('Cached enrichment validation failed.')
     }
 
-    return await buildCatalogFromText({
+    return await buildEnrichmentFromText({
       payloadText: record.payloadText,
       source: 'cache',
-      catalogVersion: record.catalogVersion,
-      publishedAt: record.publishedAt,
       dataUrl: record.dataUrl,
       dataSha256: actualSha256,
     })
   } catch {
-    await clearCachedSongListRecord().catch(() => {})
+    await clearCachedEnrichmentRecord().catch(() => {})
     return null
   }
 }
 
-async function loadEmbeddedCatalog() {
-  const response = await fetch(EMBEDDED_CATALOG_URL)
+async function loadEmbeddedEnrichment() {
+  const response = await fetch(EMBEDDED_ENRICHMENT_URL)
 
   if (!response.ok) {
-    throw new Error(`无法加载曲库数据：${response.status}`)
+    throw new Error(`无法加载内置曲库增强信息：${response.status}`)
   }
 
-  return await buildCatalogFromText({
+  return await buildEnrichmentFromText({
     payloadText: await response.text(),
     source: 'embedded',
+    dataUrl: EMBEDDED_ENRICHMENT_URL,
   })
 }
 
-async function loadSongCatalogState() {
+async function loadEnrichmentState() {
+  if (activeEnrichment) {
+    return activeEnrichment
+  }
+
+  if (!enrichmentPromise) {
+    enrichmentPromise = (async () => {
+      const cachedEnrichment = await loadCachedEnrichment()
+      const nextEnrichment = cachedEnrichment ?? await loadEmbeddedEnrichment()
+      activeEnrichment = nextEnrichment
+      return nextEnrichment
+    })()
+  }
+
+  return await enrichmentPromise
+}
+
+function mergeSongEnrichment(song: RawSong, enrichment: SongEnrichmentPayload) {
+  const record = enrichment.records[String(song.music_id)]
+  return record ? { ...song, ...record } : song
+}
+
+function normalizeCatalogSongs(payload: SongCatalogResponse, enrichment: SongEnrichmentPayload) {
+  return payload.mdb_data.map((song, index) => normalizeSong(mergeSongEnrichment(song, enrichment), index))
+}
+
+async function loadMdbPayload(manifest: MdbVersionManifest, version: number) {
+  const mdbUrl = manifest.files[String(version)]
+
+  if (!mdbUrl) {
+    throw new Error(`本地 MDB 版本 ${version} 缺少文件路径。`)
+  }
+
+  const response = await fetch(mdbUrl)
+
+  if (!response.ok) {
+    throw new Error(`无法加载本地 MDB ${version}：${response.status}`)
+  }
+
+  return {
+    mdbUrl,
+    payload: parseMdbBinary(new Uint8Array(await response.arrayBuffer())),
+  }
+}
+
+async function buildCatalogForVersion(manifest: MdbVersionManifest, version: number) {
+  const [enrichment, mdb] = await Promise.all([
+    loadEnrichmentState(),
+    loadMdbPayload(manifest, version),
+  ])
+
+  return {
+    source: 'local-mdb',
+    mdbVersion: version,
+    mdbUrl: mdb.mdbUrl,
+    isDefaultVersion: version === manifest.latest,
+    enrichmentSource: enrichment.source,
+    catalogVersion: enrichment.catalogVersion,
+    publishedAt: enrichment.publishedAt,
+    dataUrl: enrichment.dataUrl,
+    dataSize: enrichment.dataSize,
+    dataSha256: enrichment.dataSha256,
+    songs: normalizeCatalogSongs(mdb.payload, enrichment.payload),
+  } satisfies ActiveSongCatalog
+}
+
+async function loadSongCatalogState(options?: { mdbVersion?: number | null }) {
+  const manifest = await loadMdbManifest()
+  const version = resolveMdbVersion(manifest, options?.mdbVersion)
+  const activeCatalog = activeCatalogs.get(version)
+
   if (activeCatalog) {
     return activeCatalog
   }
 
-  if (!catalogPromise) {
-    catalogPromise = (async () => {
-      const cachedCatalog = await loadCachedCatalog()
-      const nextCatalog = cachedCatalog ?? await loadEmbeddedCatalog()
-      activeCatalog = nextCatalog
-      return nextCatalog
-    })()
+  const activePromise = catalogPromiseCache.get(version)
+
+  if (activePromise) {
+    return await activePromise
   }
 
-  return await catalogPromise
+  const loader = buildCatalogForVersion(manifest, version).then((catalog) => {
+    activeCatalogs.set(version, catalog)
+    loadedCatalogVersions.add(version)
+    return catalog
+  })
+  catalogPromiseCache.set(version, loader)
+  return await loader
+}
+
+function shouldNotifyListener(catalog: ActiveSongCatalog, target: SongCatalogListenerTarget) {
+  if (target === 'all') {
+    return true
+  }
+
+  if (target === 'default') {
+    return catalog.isDefaultVersion
+  }
+
+  return catalog.mdbVersion === target
 }
 
 function notifySongCatalogUpdated(catalog: ActiveSongCatalog) {
-  songCatalogListeners.forEach((listener) => {
-    listener(catalog.songs, catalog)
+  songCatalogListeners.forEach((target, listener) => {
+    if (shouldNotifyListener(catalog, target)) {
+      listener(catalog.songs, catalog)
+    }
   })
 }
 
-function applyActiveSongCatalog(catalog: ActiveSongCatalog, options?: { notify?: boolean }) {
-  activeCatalog = catalog
-  catalogPromise = Promise.resolve(catalog)
+async function rebuildLoadedCatalogsAndNotify(versions: number[]) {
+  for (const version of versions) {
+    const catalog = await loadSongCatalogState({ mdbVersion: version })
+    notifySongCatalogUpdated(catalog)
+  }
+}
+
+async function applyActiveEnrichment(enrichment: ActiveEnrichment, options?: { notify?: boolean }) {
+  const loadedVersions = [...loadedCatalogVersions]
+  activeEnrichment = enrichment
+  enrichmentPromise = Promise.resolve(enrichment)
+  activeCatalogs.clear()
+  catalogPromiseCache.clear()
 
   if (options?.notify !== false) {
-    notifySongCatalogUpdated(catalog)
+    await rebuildLoadedCatalogsAndNotify(loadedVersions)
   }
 }
 
@@ -444,45 +670,16 @@ function compareCatalogVersions(left: string, right: string) {
   return 0
 }
 
-function shouldApplySongListManifest(manifest: SongListVersionManifest, current: ActiveSongCatalog) {
-  if (manifest.dataSha256 === current.dataSha256) {
+function shouldApplyEnrichmentUpdate(remote: ActiveEnrichment, current: ActiveEnrichment) {
+  if (remote.dataSha256 === current.dataSha256) {
     return false
   }
 
   if (current.source === 'cache' && current.catalogVersion) {
-    return compareCatalogVersions(manifest.catalogVersion, current.catalogVersion) > 0
+    return compareCatalogVersions(remote.catalogVersion, current.catalogVersion) > 0
   }
 
   return true
-}
-
-async function fetchSongListManifest() {
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), SONG_LIST_FETCH_TIMEOUT_MS)
-
-  try {
-    const url = new URL(SONG_LIST_MANIFEST_URL)
-    url.searchParams.set('t', String(Date.now()))
-
-    const response = await fetch(url.toString(), {
-      cache: 'no-store',
-      signal: controller.signal,
-    })
-
-    if (!response.ok) {
-      throw new Error(`曲库版本信息请求失败：${response.status}`)
-    }
-
-    return parseSongListManifest(await response.json())
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('曲库更新检查超时。')
-    }
-
-    throw error
-  } finally {
-    window.clearTimeout(timeout)
-  }
 }
 
 function concatChunks(chunks: Uint8Array[], totalBytes: number) {
@@ -497,29 +694,31 @@ function concatChunks(chunks: Uint8Array[], totalBytes: number) {
   return result
 }
 
-async function fetchSongListData(
-  manifest: SongListVersionManifest,
-  onProgress: (bytes: number, totalBytes: number | null) => void,
+async function fetchEnrichmentBytes(
+  url: string,
+  onProgress?: (bytes: number, totalBytes: number | null) => void,
 ) {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), SONG_LIST_DOWNLOAD_TIMEOUT_MS)
 
   try {
-    const response = await fetch(manifest.dataUrl, {
+    const requestUrl = new URL(url)
+    requestUrl.searchParams.set('t', String(Date.now()))
+
+    const response = await fetch(requestUrl.toString(), {
       cache: 'no-store',
       signal: controller.signal,
     })
 
     if (!response.ok) {
-      throw new Error(`曲库下载失败：${response.status}`)
+      throw new Error(`曲库增强信息请求失败：${response.status}`)
     }
 
     const contentLength = parseNumber(response.headers.get('Content-Length'))
-    const expectedTotal = manifest.dataSize > 0 ? manifest.dataSize : contentLength
 
     if (!response.body) {
       const bytes = new Uint8Array(await response.arrayBuffer())
-      onProgress(bytes.byteLength, expectedTotal)
+      onProgress?.(bytes.byteLength, contentLength)
       return bytes
     }
 
@@ -537,14 +736,14 @@ async function fetchSongListData(
       if (value) {
         chunks.push(value)
         receivedBytes += value.byteLength
-        onProgress(receivedBytes, expectedTotal)
+        onProgress?.(receivedBytes, contentLength)
       }
     }
 
     return concatChunks(chunks, receivedBytes)
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('曲库下载超时。')
+      throw new Error('曲库增强信息下载超时。')
     }
 
     throw error
@@ -553,48 +752,43 @@ async function fetchSongListData(
   }
 }
 
-async function downloadAndApplySongListUpdate(manifest: SongListVersionManifest) {
-  songListUpdateBytes.value = 0
-  songListUpdateTotalBytes.value = manifest.dataSize
-
-  const bytes = await fetchSongListData(manifest, (receivedBytes, totalBytes) => {
-    songListUpdateBytes.value = receivedBytes
-    songListUpdateTotalBytes.value = totalBytes
-  })
-
-  if (bytes.byteLength !== manifest.dataSize) {
-    throw new Error('曲库文件大小校验失败。')
-  }
-
-  const actualSha256 = await sha256Hex(bytes)
-
-  if (actualSha256 !== manifest.dataSha256) {
-    throw new Error('曲库文件 SHA-256 校验失败。')
-  }
-
+async function fetchRemoteEnrichment(onProgress?: (bytes: number, totalBytes: number | null) => void) {
+  const bytes = await fetchEnrichmentBytes(REMOTE_ENRICHMENT_URL, onProgress)
   const payloadText = textDecoder.decode(bytes)
-  const nextCatalog = await buildCatalogFromText({
-    payloadText,
-    source: 'cache',
-    catalogVersion: manifest.catalogVersion,
-    publishedAt: manifest.publishedAt,
-    dataUrl: manifest.dataUrl,
-    dataSha256: actualSha256,
-  })
 
-  await writeCachedSongListRecord({
-    id: SONG_LIST_CACHE_KEY,
-    schemaVersion: SONG_LIST_MANIFEST_SCHEMA_VERSION,
-    catalogVersion: manifest.catalogVersion,
-    publishedAt: manifest.publishedAt,
-    dataUrl: manifest.dataUrl,
-    dataSize: bytes.byteLength,
-    dataSha256: actualSha256,
+  return await buildEnrichmentFromText({
     payloadText,
+    source: 'remote',
+    dataUrl: REMOTE_ENRICHMENT_URL,
+  })
+}
+
+function toUpdateManifest(enrichment: ActiveEnrichment): SongListVersionManifest {
+  return {
+    schemaVersion: 1,
+    catalogVersion: enrichment.catalogVersion,
+    publishedAt: enrichment.publishedAt ?? '',
+    dataUrl: enrichment.dataUrl ?? REMOTE_ENRICHMENT_URL,
+    dataSize: enrichment.dataSize,
+    dataSha256: enrichment.dataSha256,
+    notes: enrichment.payload.notes,
+  }
+}
+
+async function writeAndApplyEnrichmentUpdate(enrichment: ActiveEnrichment) {
+  await writeCachedEnrichmentRecord({
+    id: SONG_LIST_CACHE_KEY,
+    schemaVersion: 1,
+    catalogVersion: enrichment.catalogVersion,
+    publishedAt: enrichment.publishedAt,
+    dataUrl: enrichment.dataUrl ?? REMOTE_ENRICHMENT_URL,
+    dataSize: enrichment.dataSize,
+    dataSha256: enrichment.dataSha256,
+    payloadText: enrichment.payloadText,
     savedAt: Date.now(),
   })
 
-  applyActiveSongCatalog(nextCatalog)
+  await applyActiveEnrichment({ ...enrichment, source: 'cache' })
 }
 
 function resetSongListUpdateActionState() {
@@ -625,28 +819,46 @@ async function runSongListUpdateCheck() {
     return null
   }
 
-  let manifest: SongListVersionManifest
-  let current: ActiveSongCatalog
+  songListUpdateState.value = 'checking'
+
+  let currentEnrichment: ActiveEnrichment
+  let currentCatalog: ActiveSongCatalog
 
   try {
-    manifest = await fetchSongListManifest()
-    current = await loadSongCatalogState()
+    currentEnrichment = await loadEnrichmentState()
+    currentCatalog = await loadSongCatalogState()
   } catch {
+    songListUpdateState.value = 'idle'
     return null
   }
 
-  if (!shouldApplySongListManifest(manifest, current)) {
+  let remoteEnrichment: ActiveEnrichment
+
+  try {
+    remoteEnrichment = await fetchRemoteEnrichment()
+  } catch {
+    songListUpdateState.value = 'idle'
     return null
   }
 
-  const update = { manifest, current } satisfies SongListAvailableUpdate
+  if (!shouldApplyEnrichmentUpdate(remoteEnrichment, currentEnrichment)) {
+    songListUpdateState.value = 'idle'
+    return null
+  }
+
+  const update = {
+    manifest: toUpdateManifest(remoteEnrichment),
+    current: currentCatalog,
+  } satisfies SongListAvailableUpdate
   availableSongListUpdate.value = update
   songListUpdateDialogVisible.value = true
   songListUpdateState.value = 'downloading'
   resetSongListUpdateActionState()
+  songListUpdateBytes.value = remoteEnrichment.dataSize
+  songListUpdateTotalBytes.value = remoteEnrichment.dataSize
 
   try {
-    await downloadAndApplySongListUpdate(manifest)
+    await writeAndApplyEnrichmentUpdate(remoteEnrichment)
     songListUpdateState.value = 'updated'
     songListUpdateError.value = ''
     scheduleSongListUpdateDialogClose()
@@ -654,26 +866,36 @@ async function runSongListUpdateCheck() {
     songListUpdateState.value = 'error'
     songListUpdateError.value = error instanceof Error && error.message
       ? error.message
-      : '曲库更新失败，请稍后重试。'
+      : '曲库增强信息更新失败，请稍后重试。'
   }
 
   return update
 }
 
-export function onSongCatalogUpdated(listener: SongCatalogListener) {
-  songCatalogListeners.add(listener)
+export function onSongCatalogUpdated(
+  listener: SongCatalogListener,
+  options?: { mdbVersion?: SongCatalogListenerTarget },
+) {
+  songCatalogListeners.set(listener, options?.mdbVersion ?? 'default')
 
   return () => {
     songCatalogListeners.delete(listener)
   }
 }
 
-export function loadSongCatalog(): Promise<SongViewModel[]> {
-  return loadSongCatalogState().then((catalog) => catalog.songs)
+export function loadSongCatalog(options?: { mdbVersion?: number | null }): Promise<SongViewModel[]> {
+  return loadSongCatalogState(options).then((catalog) => catalog.songs)
 }
 
-export async function loadSongByMusicId(musicId: number): Promise<SongViewModel | undefined> {
-  const songs = await loadSongCatalog()
+export function loadSongCatalogForVersion(mdbVersion: number): Promise<SongViewModel[]> {
+  return loadSongCatalog({ mdbVersion })
+}
+
+export async function loadSongByMusicId(
+  musicId: number,
+  options?: { mdbVersion?: number | null },
+): Promise<SongViewModel | undefined> {
+  const songs = await loadSongCatalog(options)
   return songs.find((song) => song.musicId === musicId)
 }
 
