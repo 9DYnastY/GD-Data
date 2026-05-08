@@ -8,6 +8,7 @@ import favoriteIconSrc from '../assets/detail-page/favorite.png'
 import noteIconSrc from '../assets/detail-page/note.png'
 import { loadBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
 import { mapBestScoresToList } from '../lib/bjmania/client'
+import { hasDtxChartSet } from '../lib/chart-preview-manifest'
 import { saveImageToGallery } from '../lib/native-image-saver'
 import { openNativeWebView } from '../lib/native-webview'
 import { loadSongByMusicId, onSongCatalogUpdated } from '../lib/song-catalog'
@@ -496,6 +497,26 @@ async function openSongRemyWiki() {
   }
 }
 
+async function openChartPreview() {
+  if (!song.value) {
+    return
+  }
+
+  if (!hasDtxChartSet(song.value.musicId)) {
+    showToast('暂未收录谱面预览')
+    return
+  }
+
+  await router.push({
+    name: 'song-chart',
+    params: { musicId: song.value.musicId },
+    query: {
+      instrument: selectedInstrumentKey.value,
+      ...(route.query.version ? { version: route.query.version } : {}),
+    },
+  })
+}
+
 function toggleSongFavorite() {
   if (!song.value) {
     return
@@ -743,7 +764,12 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="song-detail__action-row" aria-label="歌曲操作">
-          <button class="song-detail__icon-button" type="button" aria-label="音符">
+          <button
+            class="song-detail__icon-button song-detail__icon-button--action"
+            type="button"
+            aria-label="谱面预览"
+            @click="openChartPreview"
+          >
             <img :src="noteIconSrc" alt="" aria-hidden="true" />
           </button>
           <button

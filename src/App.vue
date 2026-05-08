@@ -246,6 +246,20 @@ async function handleAndroidBackButton() {
     return
   }
 
+  if (route.name === 'song-chart') {
+    if (window.history.length > 1) {
+      await router.back()
+      return
+    }
+
+    await router.replace({
+      name: 'song-detail',
+      params: route.params,
+      query: route.query.version ? { version: route.query.version } : undefined,
+    })
+    return
+  }
+
   if (route.meta.showBottomNav === true) {
     const now = Date.now()
 

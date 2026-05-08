@@ -59,6 +59,12 @@ const router = createRouter({
       },
     },
     {
+      path: '/song/:musicId/chart',
+      name: 'song-chart',
+      component: () => import('../views/ChartPreviewView.vue'),
+      props: true,
+    },
+    {
       path: '/song/:musicId',
       name: 'song-detail',
       component: () => import('../views/SongDetailView.vue'),
