@@ -97,6 +97,7 @@ export interface DtxDrawingConfig {
   maxHeight: number
   chartMode: DtxChartMode
   gameMode: DtxGameMode
+  reverse: boolean
   isLevelShown: boolean
 }
 
@@ -134,4 +135,3 @@ export const EMPTY_DTX_JSON: DtxJson = {
   bpmSegments: [],
   laneChipCounter: {},
 }
-

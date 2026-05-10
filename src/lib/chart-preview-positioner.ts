@@ -13,13 +13,13 @@ import type {
   DtxTextRectPos,
 } from './chart-preview-types'
 
-interface DtxChipRelativePosSize {
+export interface DtxChipRelativePosSize {
   posX: number
   width: number
   height: number
 }
 
-interface DtxChipDrawingLane {
+export interface DtxChipDrawingLane {
   drawingLane: string
   chipRelativePosSize: DtxChipRelativePosSize
 }
@@ -36,10 +36,10 @@ interface DtxFrameRect {
   canvasSheetIndex: number
 }
 
-const DEFAULT_CHIP_HEIGHT = 5
-const DEFAULT_CHIP_WIDTH = 18
-const DEFAULT_FRAME_RECT_WIDTH = 201
-const FRAME_RECT_POS_X = 60
+export const DEFAULT_CHIP_HEIGHT = 5
+export const DEFAULT_CHIP_WIDTH = 18
+export const DEFAULT_FRAME_RECT_WIDTH = 201
+export const FRAME_RECT_POS_X = 60
 const BAR_NUM_MARKER_WIDTH = 39
 const MIN_CANVAS_SEGMENT_HEIGHT = 512
 const CHIP_SEGMENT_VISUAL_HEIGHT = 48
@@ -80,11 +80,11 @@ const GUITAR_BASS_CHIP_POS_SIZE_INFO: Record<string, DtxChipRelativePosSize> = {
 const GUITAR_BASS_BUTTON_ORDER = ['Red', 'Green', 'Blue', 'Yellow', 'Pink'] as const
 const GUITAR_BASS_V_BUTTON_ORDER = ['Red', 'Green', 'Blue', 'Green', 'Blue'] as const
 
-function getFrameRectRelativePosX() {
+export function getFrameRectRelativePosX() {
   return FRAME_RECT_POS_X
 }
 
-function getFrameRectWidth(gameMode: DtxGameMode, chartMode: DtxChartMode) {
+export function getFrameRectWidth(gameMode: DtxGameMode, chartMode: DtxChartMode) {
   if (gameMode === 'Drum' && (chartMode === 'Classic' || chartMode === 'XG/Gitadora')) {
     return DEFAULT_FRAME_RECT_WIDTH - DM_CHIP_POS_SIZE_INFO.RideCymbal.width
   }
@@ -96,7 +96,7 @@ function getFrameRectWidth(gameMode: DtxGameMode, chartMode: DtxChartMode) {
   return DEFAULT_FRAME_RECT_WIDTH
 }
 
-function getFullBodyFrameWidth(gameMode: DtxGameMode, chartMode: DtxChartMode) {
+export function getFullBodyFrameWidth(gameMode: DtxGameMode, chartMode: DtxChartMode) {
   return FRAME_RECT_POS_X + getFrameRectWidth(gameMode, chartMode) + BAR_NUM_MARKER_WIDTH
 }
 
@@ -127,7 +127,7 @@ function convertLaneCodeToButtonPressArray(laneCode: string, gameMode: DtxGameMo
   return pressedButtons
 }
 
-function getRelativeSizePosOfChipsForLaneCode(
+export function getRelativeSizePosOfChipsForLaneCode(
   laneCode: string,
   gameMode: DtxGameMode,
   chartMode: DtxChartMode,
@@ -180,7 +180,7 @@ function getRelativeSizePosOfChipsForLaneCode(
     .filter((chip): chip is DtxChipDrawingLane => Boolean(chip.chipRelativePosSize))
 }
 
-function convertHoldNoteRectsToDrawingImageRects(
+export function convertHoldNoteRectsToDrawingImageRects(
   holdNoteRect: DtxRect,
   laneCode: string,
   gameMode: DtxGameMode,
@@ -229,7 +229,7 @@ export class DtxCanvasPositioner {
   constructor(dtxJson: DtxJson, drawingOptions: DtxDrawingConfig) {
     this.barInfoArray = dtxJson.bars
     this.actualPixelsPerSecond = drawingOptions.scale * this.basePixelsPerSecond
-    this.isDrawFromDownToUp = drawingOptions.gameMode === 'Drum'
+    this.isDrawFromDownToUp = drawingOptions.gameMode === 'Drum' || drawingOptions.reverse
 
     const mapping = this.computeContinuousBarIndexToFrameSheetMapping(
       dtxJson,

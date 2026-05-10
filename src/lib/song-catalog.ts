@@ -131,13 +131,13 @@ export const songListUpdateProgressRatio = computed(() => {
 export const songListUpdateStatusMessage = computed(() => {
   switch (songListUpdateState.value) {
     case 'checking':
-      return '正在检查曲库增强信息'
+      return '正在检查曲库'
     case 'downloading':
-      return '正在下载曲库增强信息'
+      return '正在下载曲库'
     case 'updated':
-      return '曲库增强信息已更新'
+      return '曲库已更新'
     case 'error':
-      return '曲库增强信息更新失败'
+      return '曲库更新失败'
     case 'idle':
     default:
       return ''
@@ -313,13 +313,13 @@ function parseSongEnrichmentRecord(value: unknown): SongEnrichmentRecord | null 
 
 function parseSongEnrichmentPayload(value: unknown): SongEnrichmentPayload {
   if (!isRecord(value) || !isRecord(value.records)) {
-    throw new Error('曲库增强信息格式不正确。')
+    throw new Error('曲库格式不正确。')
   }
 
   const schemaVersion = parseNumber(value.schemaVersion)
 
   if (schemaVersion !== 1) {
-    throw new Error('曲库增强信息版本不兼容。')
+    throw new Error('曲库版本不兼容。')
   }
 
   const records: Record<string, SongEnrichmentRecord> = {}
@@ -508,7 +508,7 @@ async function loadEmbeddedEnrichment() {
   const response = await fetch(EMBEDDED_ENRICHMENT_URL)
 
   if (!response.ok) {
-    throw new Error(`无法加载内置曲库增强信息：${response.status}`)
+    throw new Error(`无法加载内置曲库：${response.status}`)
   }
 
   return await buildEnrichmentFromText({
@@ -711,7 +711,7 @@ async function fetchEnrichmentBytes(
     })
 
     if (!response.ok) {
-      throw new Error(`曲库增强信息请求失败：${response.status}`)
+      throw new Error(`曲库更新请求失败：${response.status}`)
     }
 
     const contentLength = parseNumber(response.headers.get('Content-Length'))
@@ -743,7 +743,7 @@ async function fetchEnrichmentBytes(
     return concatChunks(chunks, receivedBytes)
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('曲库增强信息下载超时。')
+      throw new Error('曲库下载超时。')
     }
 
     throw error
@@ -866,7 +866,7 @@ async function runSongListUpdateCheck() {
     songListUpdateState.value = 'error'
     songListUpdateError.value = error instanceof Error && error.message
       ? error.message
-      : '曲库增强信息更新失败，请稍后重试。'
+      : '曲库更新失败，请稍后重试。'
   }
 
   return update

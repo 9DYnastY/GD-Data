@@ -4,11 +4,11 @@ const DEFAULT_BACKGROUND_COLOR = '#1f1f1f'
 const MAX_CANVAS_BITMAP_SIZE = 32767
 const FRAME_RECT_BLEED_PX = 2
 
-const CHIP_COLOR_INFO: Record<string, string> = {
+export const CHIP_COLOR_INFO: Record<string, string> = {
   Bar: '#b1b1b1',
   QuarterBar: '#535353',
   BGM: '#278f50',
-  EndLine: '#f05252',
+  EndLine: '#ff0000',
   LeftCrashCymbal: '#ff4ca1',
   'Hi-Hat': '#579ead',
   LeftBassPedal: '#e7baff',
@@ -28,10 +28,10 @@ const CHIP_COLOR_INFO: Record<string, string> = {
   Pink: '#ff62cf',
   Open: '#ffffff',
   OpenV: '#ffffff',
-  Wail: '#c9c9ff',
+  Wail: '#38f04f',
 }
 
-const HOLD_COLOR_INFO: Record<string, string> = {
+export const HOLD_COLOR_INFO: Record<string, string> = {
   RedHold: 'rgba(240, 58, 58, 0.56)',
   GreenHold: 'rgba(65, 208, 90, 0.56)',
   BlueHold: 'rgba(56, 168, 255, 0.56)',
@@ -56,31 +56,14 @@ const ASSET_URLS: Record<string, string> = {
   Blue: new URL('../assets/chart-preview/blue_gfchip.png', import.meta.url).href,
   Yellow: new URL('../assets/chart-preview/yellow_gfchip.png', import.meta.url).href,
   Pink: new URL('../assets/chart-preview/mag_gfchip.png', import.meta.url).href,
-  Wail: new URL('../assets/chart-preview/wail_gfchip.png', import.meta.url).href,
   Open: new URL('../assets/chart-preview/open_gfchip.png', import.meta.url).href,
   OpenV: new URL('../assets/chart-preview/open_gfvchip.png', import.meta.url).href,
-  DrumBasicBannerSmall: new URL('../assets/chart-preview/DrumBasicBannerSmall.png', import.meta.url).href,
-  DrumAdvancedBannerSmall: new URL('../assets/chart-preview/DrumAdvancedBannerSmall.png', import.meta.url).href,
-  DrumExtremeBannerSmall: new URL('../assets/chart-preview/DrumExtremeBannerSmall.png', import.meta.url).href,
-  DrumMasterBannerSmall: new URL('../assets/chart-preview/DrumMasterBannerSmall.png', import.meta.url).href,
-  GuitarBasicBannerSmall: new URL('../assets/chart-preview/GuitarBasicBannerSmall.png', import.meta.url).href,
-  GuitarAdvancedBannerSmall: new URL('../assets/chart-preview/GuitarAdvancedBannerSmall.png', import.meta.url).href,
-  GuitarExtremeBannerSmall: new URL('../assets/chart-preview/GuitarExtremeBannerSmall.png', import.meta.url).href,
-  GuitarMasterBannerSmall: new URL('../assets/chart-preview/GuitarMasterBannerSmall.png', import.meta.url).href,
-  BassBasicBannerSmall: new URL('../assets/chart-preview/BassBasicBannerSmall.png', import.meta.url).href,
-  BassAdvancedBannerSmall: new URL('../assets/chart-preview/BassAdvancedBannerSmall.png', import.meta.url).href,
-  BassExtremeBannerSmall: new URL('../assets/chart-preview/BassExtremeBannerSmall.png', import.meta.url).href,
-  BassMasterBannerSmall: new URL('../assets/chart-preview/BassMasterBannerSmall.png', import.meta.url).href,
-  RedHold: new URL('../assets/chart-preview/red_holdrect_test2.png', import.meta.url).href,
-  GreenHold: new URL('../assets/chart-preview/green_holdrect_test2.png', import.meta.url).href,
-  BlueHold: new URL('../assets/chart-preview/blue_holdrect_test2.png', import.meta.url).href,
-  YellowHold: new URL('../assets/chart-preview/yellow_holdrect_test2.png', import.meta.url).href,
-  PinkHold: new URL('../assets/chart-preview/pink_holdrect_test2.png', import.meta.url).href,
 }
 
 const imageCache = new Map<string, Promise<HTMLImageElement | null>>()
+const resolvedImageCache = new Map<string, HTMLImageElement | null>()
 
-function loadChartImage(name: string) {
+export function loadChartImage(name: string) {
   const url = ASSET_URLS[name]
 
   if (!url) {
@@ -95,13 +78,28 @@ function loadChartImage(name: string) {
 
   const imagePromise = new Promise<HTMLImageElement | null>((resolve) => {
     const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () => resolve(null)
+    image.onload = () => {
+      resolvedImageCache.set(name, image)
+      resolve(image)
+    }
+    image.onerror = () => {
+      resolvedImageCache.set(name, null)
+      resolve(null)
+    }
     image.src = url
   })
 
   imageCache.set(name, imagePromise)
   return imagePromise
+}
+
+export function getLoadedChartImage(name: string) {
+  if (resolvedImageCache.has(name)) {
+    return resolvedImageCache.get(name) ?? null
+  }
+
+  void loadChartImage(name)
+  return null
 }
 
 function setCanvasSize(canvas: HTMLCanvasElement, canvasData: DtxCanvasData, displayScale: number) {
@@ -143,6 +141,53 @@ function setCanvasSize(canvas: HTMLCanvasElement, canvasData: DtxCanvasData, dis
 function drawRect(context: CanvasRenderingContext2D, rect: DtxRect, fill: string) {
   context.fillStyle = fill
   context.fillRect(rect.posX, rect.posY, rect.width, rect.height)
+}
+
+export function drawProgrammaticHoldRect(context: CanvasRenderingContext2D, name: string, rect: DtxRect) {
+  if (rect.width <= 0 || rect.height <= 0) {
+    return
+  }
+
+  const edgeWidth = Math.max(1, Math.min(2, rect.width * 0.14))
+  context.save()
+  context.fillStyle = HOLD_COLOR_INFO[name] ?? 'rgba(255,255,255,0.28)'
+  context.fillRect(rect.posX, rect.posY, rect.width, rect.height)
+
+  context.fillStyle = 'rgba(0, 0, 0, 0.24)'
+  context.fillRect(rect.posX, rect.posY, edgeWidth, rect.height)
+  context.fillRect(rect.posX + rect.width - edgeWidth, rect.posY, edgeWidth, rect.height)
+  context.restore()
+}
+
+export function drawProgrammaticWailChip(context: CanvasRenderingContext2D, rect: DtxRect) {
+  if (rect.width <= 0 || rect.height <= 0) {
+    return
+  }
+
+  const scale = 0.86
+  const width = rect.width * scale
+  const height = rect.height * scale
+  const left = rect.posX + (rect.width - width) / 2
+  const top = rect.posY + (rect.height - height) / 2
+  const right = left + width
+  const bottom = top + height
+  const centerX = left + width / 2
+  const headBaseY = top + height * 0.43
+  const stemInsetX = width * 0.33
+
+  context.save()
+  context.beginPath()
+  context.moveTo(centerX, top + height * 0.03)
+  context.lineTo(right - width * 0.03, headBaseY)
+  context.lineTo(right - stemInsetX, headBaseY)
+  context.lineTo(right - stemInsetX, bottom - height * 0.04)
+  context.lineTo(left + stemInsetX, bottom - height * 0.04)
+  context.lineTo(left + stemInsetX, headBaseY)
+  context.lineTo(left + width * 0.03, headBaseY)
+  context.closePath()
+  context.fillStyle = '#25cf38'
+  context.fill()
+  context.restore()
 }
 
 function drawFrameRect(context: CanvasRenderingContext2D, rect: DtxRect) {
@@ -188,6 +233,16 @@ function drawText(context: CanvasRenderingContext2D, textPos: DtxTextRectPos) {
 }
 
 async function drawChip(context: CanvasRenderingContext2D, chip: DtxChipPixelRectPos) {
+  if (chip.laneType === 'Wail') {
+    drawProgrammaticWailChip(context, {
+      posX: chip.rectPos.posX,
+      posY: chip.rectPos.posY - chip.rectPos.height / 2,
+      width: chip.rectPos.width,
+      height: chip.rectPos.height,
+    })
+    return
+  }
+
   const image = await loadChartImage(chip.laneType)
 
   if (!image) {
@@ -215,23 +270,8 @@ async function drawImageRect(context: CanvasRenderingContext2D, imageRect: DtxIm
   )
 }
 
-async function drawHoldRect(context: CanvasRenderingContext2D, imageRect: DtxImageRectPos) {
-  const image = await loadChartImage(imageRect.name)
-
-  if (!image) {
-    drawRect(context, imageRect.rectPos, HOLD_COLOR_INFO[imageRect.name] ?? 'rgba(255,255,255,0.28)')
-    return
-  }
-
-  const pattern = context.createPattern(image, 'repeat-y')
-
-  if (!pattern) {
-    drawRect(context, imageRect.rectPos, HOLD_COLOR_INFO[imageRect.name] ?? 'rgba(255,255,255,0.28)')
-    return
-  }
-
-  context.fillStyle = pattern
-  context.fillRect(imageRect.rectPos.posX, imageRect.rectPos.posY, imageRect.rectPos.width, imageRect.rectPos.height)
+function drawHoldRect(context: CanvasRenderingContext2D, imageRect: DtxImageRectPos) {
+  drawProgrammaticHoldRect(context, imageRect.name, imageRect.rectPos)
 }
 
 export async function renderDtxCanvas(canvas: HTMLCanvasElement, canvasData: DtxCanvasData, displayScale = 1) {
@@ -250,7 +290,7 @@ export async function renderDtxCanvas(canvas: HTMLCanvasElement, canvasData: Dtx
   }
 
   for (const holdRect of canvasData.holdNoteRect) {
-    await drawHoldRect(context, holdRect)
+    drawHoldRect(context, holdRect)
   }
 
   for (const imageRect of canvasData.images) {

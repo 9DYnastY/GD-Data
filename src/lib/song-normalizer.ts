@@ -51,7 +51,7 @@ const GF_VERSION_MAP: Record<number, string> = {
   26: 'NEX+AGE',
   27: 'HIGH-VOLTAGE',
   28: 'FUZZ-UP',
-  29: 'GALAXXY WAVE',
+  29: 'GALAXY WAVE',
   30: 'GALAXY WAVE DELTA',
 }
 
@@ -84,7 +84,7 @@ const DM_VERSION_MAP: Record<number, string> = {
   25: 'NEX+AGE',
   26: 'HIGH-VOLTAGE',
   27: 'FUZZ-UP',
-  28: 'GALAXXY WAVE',
+  28: 'GALAXY WAVE',
   29: 'GALAXY WAVE DELTA',
 }
 
@@ -238,6 +238,7 @@ export function normalizeSong(rawSong: RawSong, index: number): SongViewModel {
   return {
     index,
     musicId: rawSong.music_id,
+    rawMdb: { ...rawSong },
     displayTitle,
     displayArtist,
     titleAscii: normalizeText(rawSong.title_ascii, displayTitle),

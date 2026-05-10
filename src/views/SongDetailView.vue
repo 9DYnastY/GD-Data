@@ -8,7 +8,11 @@ import favoriteIconSrc from '../assets/detail-page/favorite.png'
 import noteIconSrc from '../assets/detail-page/note.png'
 import { loadBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
 import { mapBestScoresToList } from '../lib/bjmania/client'
-import { hasDtxChartSet } from '../lib/chart-preview-manifest'
+import {
+  getAvailableDtxLevels,
+  hasLoadedDtxChartSet,
+  loadDtxChartManifest,
+} from '../lib/chart-preview-manifest'
 import { saveImageToGallery } from '../lib/native-image-saver'
 import { openNativeWebView } from '../lib/native-webview'
 import { loadSongByMusicId, onSongCatalogUpdated } from '../lib/song-catalog'
@@ -497,21 +501,39 @@ async function openSongRemyWiki() {
   }
 }
 
-async function openChartPreview() {
+async function openChartPreview(level?: LevelKey) {
   if (!song.value) {
     return
   }
 
-  if (!hasDtxChartSet(song.value.musicId)) {
+  const currentSong = song.value
+  const instrument = selectedInstrumentKey.value
+  let chartAvailable = false
+
+  try {
+    const manifest = await loadDtxChartManifest()
+    chartAvailable = hasLoadedDtxChartSet(currentSong.musicId, manifest)
+
+    if (level && !getAvailableDtxLevels(currentSong.musicId, instrument, manifest).includes(level)) {
+      showToast('暂未收录该谱面预览')
+      return
+    }
+  } catch {
+    showToast('谱面库加载失败')
+    return
+  }
+
+  if (!chartAvailable) {
     showToast('暂未收录谱面预览')
     return
   }
 
   await router.push({
     name: 'song-chart',
-    params: { musicId: song.value.musicId },
+    params: { musicId: currentSong.musicId },
     query: {
-      instrument: selectedInstrumentKey.value,
+      instrument,
+      ...(level ? { level } : {}),
       ...(route.query.version ? { version: route.query.version } : {}),
     },
   })
@@ -768,7 +790,7 @@ onBeforeUnmount(() => {
             class="song-detail__icon-button song-detail__icon-button--action"
             type="button"
             aria-label="谱面预览"
-            @click="openChartPreview"
+            @click="openChartPreview()"
           >
             <img :src="noteIconSrc" alt="" aria-hidden="true" />
           </button>
@@ -823,11 +845,15 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="song-detail__chart-grid">
-            <article
+            <button
               v-for="level in selectedLevels"
               :key="`${selectedInstrumentKey}-${level.level}`"
               class="song-detail__chart-card"
               :class="[getLevelTone(level.level), { 'song-detail__chart-card--missing': !level.available }]"
+              type="button"
+              :disabled="!level.available"
+              :aria-label="`${INSTRUMENT_LABELS[selectedInstrumentKey]} ${LEVEL_LABELS[level.level]} 谱面预览`"
+              @click="openChartPreview(level.level)"
             >
               <span class="song-detail__chart-code">{{ LEVEL_LABELS[level.level] }}</span>
               <strong>{{ level.available ? level.difficultyText : '-.-' }}</strong>
@@ -843,7 +869,7 @@ onBeforeUnmount(() => {
                 <span>{{ formatPlayStateLabel(level, getScoreRow(level.level)) }}</span>
                 <b v-if="getScoreRow(level.level)">{{ getScoreRow(level.level)?.rankLabel }}</b>
               </div>
-            </article>
+            </button>
           </div>
         </section>
       </template>
@@ -911,6 +937,8 @@ onBeforeUnmount(() => {
   --detail-action-gap: clamp(4px, 1.49vw, 6px);
   --detail-skill-padding-x: clamp(12px, 3.73vw, 15px);
   --detail-card-gap-x: clamp(12px, 3.73vw, 15px);
+  --detail-page-width: min(100%, 402px);
+  --detail-hero-bg-width: 100%;
   --detail-hero-start: calc(var(--detail-safe-top) + 80px);
   --detail-purple-height: calc(var(--detail-hero-start) + var(--detail-cover-size));
   position: relative;
@@ -926,7 +954,7 @@ onBeforeUnmount(() => {
   top: 0;
   left: 50%;
   z-index: 0;
-  width: min(100%, 402px);
+  width: var(--detail-hero-bg-width);
   height: var(--detail-purple-height);
   background: var(--detail-purple);
   transform: translateX(-50%);
@@ -949,7 +977,7 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 14px;
   align-items: center;
-  width: min(100%, 402px);
+  width: var(--detail-page-width);
   margin: 0 auto;
   padding: calc(var(--detail-safe-top) + 15px) 11px 15px;
   color: #ffffff;
@@ -995,7 +1023,7 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 1;
   display: grid;
-  width: min(100%, 402px);
+  width: var(--detail-page-width);
   margin: 0 auto;
   padding: var(--detail-hero-start) var(--detail-page-padding) 26px;
 }
@@ -1286,12 +1314,31 @@ onBeforeUnmount(() => {
 }
 
 .song-detail__chart-card {
+  appearance: none;
   display: grid;
   gap: 8px;
+  width: 100%;
   min-height: 142px;
   padding: 9px 13px 8px;
+  border: 0;
   border-radius: 11.556px;
   color: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    filter 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.song-detail__chart-card:active:not(:disabled) {
+  filter: brightness(0.96);
+  transform: scale(0.975);
+}
+
+.song-detail__chart-card:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .song-detail__chart-card--master {

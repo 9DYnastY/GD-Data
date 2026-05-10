@@ -1,7 +1,6 @@
 import type { InstrumentKey, LevelKey } from '../types/song'
 import { resolveDtxChart } from './chart-preview-manifest'
 import { DtxFileParser } from './chart-preview-parser'
-import { DtxCanvasPositioner } from './chart-preview-positioner'
 import type { DtxChartMode, DtxDifficultyLabel, DtxDrawingConfig, DtxGameMode, LoadedDtxChartPreview } from './chart-preview-types'
 
 const GAME_MODE_BY_INSTRUMENT: Record<InstrumentKey, DtxGameMode> = {
@@ -25,14 +24,29 @@ export function getDtxDifficultyLabel(level: LevelKey) {
   return DIFFICULTY_LABEL_BY_LEVEL[level]
 }
 
+function decodeDtxText(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer)
+
+  if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+    return new TextDecoder('utf-8').decode(bytes)
+  }
+
+  try {
+    return new TextDecoder('shift_jis').decode(bytes)
+  } catch {
+    return new TextDecoder().decode(bytes)
+  }
+}
+
 export async function loadDtxChartPreview(
   musicId: number,
   instrument: InstrumentKey,
   level: LevelKey,
   speed = 1,
   chartMode: DtxChartMode = 'XG/Gitadora',
+  reverse = false,
 ): Promise<LoadedDtxChartPreview> {
-  const chart = resolveDtxChart(musicId, instrument, level)
+  const chart = await resolveDtxChart(musicId, instrument, level)
 
   if (!chart) {
     throw new Error('暂未收录该谱面预览')
@@ -44,7 +58,7 @@ export async function loadDtxChartPreview(
     throw new Error(`谱面文件加载失败 (${response.status})`)
   }
 
-  const parser = new DtxFileParser(await response.text())
+  const parser = new DtxFileParser(decodeDtxText(await response.arrayBuffer()))
   const parserError = parser.getErrorMessage()
 
   if (parserError) {
@@ -57,15 +71,15 @@ export async function loadDtxChartPreview(
     maxHeight: 2000,
     chartMode,
     gameMode: getDtxGameMode(instrument),
+    reverse: instrument === 'drum' ? true : reverse,
     isLevelShown: true,
   }
   const dtxJson = parser.getDtxJson()
-  const positioner = new DtxCanvasPositioner(dtxJson, drawingConfig)
 
   return {
     chart,
     dtxJson,
     drawingConfig,
-    canvasData: positioner.getCanvasDataForDrawing(),
+    canvasData: [],
   }
 }

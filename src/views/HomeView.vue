@@ -14,6 +14,7 @@ import {
   mapBestScoresToList,
 } from '../lib/bjmania/client'
 import { preloadCoverImages, preloadCoverImagesNow } from '../lib/cover-preload'
+import { useDebugMode } from '../lib/debug-mode'
 import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
 import { favoriteMusicIds } from '../lib/song-favorites'
 import { useElementScale } from '../lib/use-element-scale'
@@ -64,6 +65,7 @@ const INSTRUMENT_TOGGLE_ASSETS: Record<InstrumentKey, string> = {
   bass: bassModeToggleSrc,
 }
 const router = useRouter()
+const debugModeEnabled = useDebugMode()
 const GF_VERSION_MAP: Record<number, string> = {
   0: 'GF1st',
   1: 'GF2nd',
@@ -494,11 +496,57 @@ function setSongListRef(element: unknown) {
   setSongCardScaleElement(element)
 }
 
+function formatDebugValue(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '--'
+  }
+
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+
+  return String(value)
+}
+
+function songMdbDebugRows(song: SongViewModel) {
+  const rawMdb = song.rawMdb
+  const rows = [
+    ['raw.music_id', rawMdb.music_id],
+    ['raw.title_name', rawMdb.title_name],
+    ['raw.title_ascii', rawMdb.title_ascii],
+    ['raw.artist_title_ascii', rawMdb.artist_title_ascii],
+    ['raw.first_ver', rawMdb.first_ver],
+    ['raw.music_type', rawMdb.music_type],
+    ['raw.genre', rawMdb.genre],
+    ['raw.bpm', rawMdb.bpm],
+    ['raw.bpm2', rawMdb.bpm2],
+    ['raw.xg_diff_list', rawMdb.xg_diff_list],
+    ['raw.disable_area', rawMdb.disable_area],
+    ['raw.is_classic_seq', rawMdb.is_classic_seq],
+    ['raw.is_remaster', rawMdb.is_remaster],
+    ['raw.b_long', rawMdb.b_long],
+    ['raw.xg_b_session', rawMdb.xg_b_session],
+  ] as const
+
+  return rows.map(([label, value]) => ({
+    label,
+    value: formatDebugValue(value),
+  }))
+}
+
 watch(searchQuery, (value) => {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(SEARCH_STORAGE_KEY, value)
   }
 })
+
+watch(debugModeEnabled, () => {
+  void resetSongMeasurements()
+}, { flush: 'post' })
 
 function resetFilters() {
   filters.versionOrder = null
@@ -918,6 +966,22 @@ function compareMasterDifficulty(
               :song="virtualSong.item"
               :selected-instrument="selectedInstrument"
             />
+            <section
+              v-if="debugModeEnabled"
+              class="song-debug-panel"
+              aria-label="song mdb debug"
+            >
+              <div class="song-debug-grid">
+                <div
+                  v-for="debugRow in songMdbDebugRows(virtualSong.item)"
+                  :key="debugRow.label"
+                  class="song-debug-row"
+                >
+                  <span>{{ debugRow.label }}</span>
+                  <strong>{{ debugRow.value }}</strong>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </section>
@@ -1235,7 +1299,49 @@ function compareMasterDifficulty(
   left: 0;
   right: 0;
   contain: layout style;
+  display: grid;
+  gap: 8px;
   will-change: transform;
+}
+
+.song-debug-panel {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 375px);
+  margin: 0 auto;
+  padding: 10px;
+  border: 1px solid rgba(79, 55, 138, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #261b53;
+  box-shadow: 0 8px 18px rgba(41, 26, 90, 0.1);
+  backdrop-filter: blur(8px);
+}
+
+.song-debug-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.song-debug-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 8px;
+  align-items: start;
+  font-family: var(--font-figma-title);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.song-debug-row span {
+  color: rgba(46, 33, 94, 0.68);
+  overflow-wrap: anywhere;
+}
+
+.song-debug-row strong {
+  color: #23164d;
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .state-card,

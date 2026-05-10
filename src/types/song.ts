@@ -55,6 +55,7 @@ export interface InstrumentDifficulty {
 export interface SongViewModel {
   index: number
   musicId: number
+  rawMdb: RawSong
   displayTitle: string
   displayArtist: string
   titleAscii: string

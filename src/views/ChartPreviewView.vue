@@ -1,29 +1,36 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import DtxChartCanvas from '../components/DtxChartCanvas.vue'
+import DtxRealtimeCanvas from '../components/DtxRealtimeCanvas.vue'
 import menuIconSrc from '../assets/chart-preview/note-menu.png'
 import pauseIconSrc from '../assets/chart-preview/note-pause.png'
 import playIconSrc from '../assets/chart-preview/note-play.png'
 import {
   getAvailableDtxInstruments,
   getAvailableDtxLevels,
-  hasDtxChartSet,
+  hasLoadedDtxChartSet,
+  loadDtxChartManifest,
 } from '../lib/chart-preview-manifest'
 import { loadDtxChartPreview } from '../lib/chart-preview-loader'
 import { loadSongByMusicId } from '../lib/song-catalog'
+import { useDebugMode } from '../lib/debug-mode'
+import { REALTIME_BASE_PIXELS_PER_SECOND } from '../lib/chart-preview-realtime-renderer'
+import { getFullBodyFrameWidth } from '../lib/chart-preview-positioner'
 import type { DtxChartMode, LoadedDtxChartPreview } from '../lib/chart-preview-types'
+import type { DtxChartManifest } from '../lib/chart-preview-manifest'
 import type { InstrumentKey, LevelKey, SongViewModel } from '../types/song'
 
 interface InstrumentOption {
   key: InstrumentKey
   label: string
+  available: boolean
 }
 
 interface LevelOption {
   key: LevelKey
   label: string
   difficultyText: string
+  available: boolean
 }
 
 interface ChartModeOption {
@@ -33,8 +40,10 @@ interface ChartModeOption {
 
 const route = useRoute()
 const router = useRouter()
+const debugModeEnabled = useDebugMode()
 
 const song = ref<SongViewModel | null>(null)
+const chartManifest = ref<DtxChartManifest | null>(null)
 const preview = ref<LoadedDtxChartPreview | null>(null)
 const loading = ref(true)
 const errorMessage = ref('')
@@ -42,20 +51,25 @@ const selectedInstrumentKey = ref<InstrumentKey>('drum')
 const selectedLevelKey = ref<LevelKey>('master')
 const selectedSpeed = ref(4)
 const selectedChartMode = ref<DtxChartMode>('XG/Gitadora')
-const viewerRef = ref<HTMLElement | null>(null)
+const reverseEnabled = ref(false)
+const viewerShellRef = ref<HTMLElement | null>(null)
 const progressShellRef = ref<HTMLElement | null>(null)
-const viewerWidth = ref(0)
 const settingsPanelOpen = ref(false)
 const playing = ref(false)
 const playbackProgress = ref(0)
-let viewerResizeObserver: ResizeObserver | null = null
+const rafAverageIntervalMs = ref(0)
+const rafLastIntervalMs = ref(0)
 let loadSequence = 0
 let playbackFrame = 0
 let playbackStartedAt = 0
 let playbackStartedProgress = 0
+let rafDebugFrame = 0
+let rafDebugLastTimestamp = 0
+let rafDebugAverageInterval = 0
 let activeProgressPointerId: number | null = null
-let pendingInitialProgress = 0
-let hasPendingInitialProgress = false
+let activeChartPointerId: number | null = null
+let chartDragStartProgress = 0
+let chartDragStartY = 0
 
 const INSTRUMENT_LABELS: Record<InstrumentKey, string> = {
   drum: 'Drum',
@@ -81,49 +95,43 @@ const SPEED_MIN = 1
 const SPEED_MAX = 9.5
 const SPEED_STEP = 0.5
 const DEFAULT_SPEED = 4
+const CHART_PREVIEW_SPEED_STORAGE_KEY = 'gddata.chartPreview.speed'
+const CHART_PREVIEW_REVERSE_STORAGE_KEY = 'gddata.chartPreview.reverse'
 const PROGRESS_RANGE_MAX = 1000
 const PROGRESS_EDGE_INSET_PX = 20
+const RAF_DEBUG_SMOOTHING = 0.12
 
 const instrumentOptions = computed<InstrumentOption[]>(() => {
   const musicId = getRouteMusicId()
-  const availableInstruments = musicId ? getAvailableDtxInstruments(musicId) : []
+  const availableInstruments = musicId !== null ? getAvailableDtxInstruments(musicId, chartManifest.value) : []
 
   return INSTRUMENT_ORDER
-    .filter((instrument) => availableInstruments.includes(instrument))
     .map((instrument) => ({
       key: instrument,
       label: INSTRUMENT_LABELS[instrument],
+      available: availableInstruments.includes(instrument),
     }))
 })
 
 const levelOptions = computed<LevelOption[]>(() => {
   const musicId = getRouteMusicId()
-  const levels = musicId ? getAvailableDtxLevels(musicId, selectedInstrumentKey.value) : []
+  const levels = musicId !== null ? getAvailableDtxLevels(musicId, selectedInstrumentKey.value, chartManifest.value) : []
   const songLevels = song.value?.instruments.find((instrument) => {
     return instrument.key === selectedInstrumentKey.value
   })?.levels ?? []
 
   return LEVEL_ORDER
-    .filter((level) => levels.includes(level) && isSongLevelAvailable(selectedInstrumentKey.value, level))
     .map((level) => {
+      const available = levels.includes(level)
       const songLevel = songLevels.find((candidate) => candidate.level === level)
 
       return {
         key: level,
         label: LEVEL_LABELS[level],
-        difficultyText: songLevel?.difficultyText ?? '-.-',
+        difficultyText: available ? songLevel?.difficultyText ?? '-.-' : '-.-',
+        available,
       }
     })
-})
-
-const fitZoom = computed(() => {
-  const firstCanvas = preview.value?.canvasData[0]
-
-  if (!firstCanvas || viewerWidth.value <= 0 || firstCanvas.canvasSize.width <= 0) {
-    return 1
-  }
-
-  return Number((viewerWidth.value / firstCanvas.canvasSize.width).toFixed(4))
 })
 
 const progressRangeValue = computed(() => Math.round(playbackProgress.value * PROGRESS_RANGE_MAX))
@@ -137,6 +145,17 @@ const currentTimeLabel = computed(() => {
 })
 const canDecreaseSpeed = computed(() => selectedSpeed.value > SPEED_MIN)
 const canIncreaseSpeed = computed(() => selectedSpeed.value < SPEED_MAX)
+const canToggleReverse = computed(() => selectedInstrumentKey.value !== 'drum')
+const realtimeReverse = computed(() => selectedInstrumentKey.value === 'drum' || reverseEnabled.value)
+const rafAverageIntervalLabel = computed(() => {
+  return rafAverageIntervalMs.value > 0 ? `${rafAverageIntervalMs.value.toFixed(1)} ms` : '-- ms'
+})
+const rafLastIntervalLabel = computed(() => {
+  return rafLastIntervalMs.value > 0 ? `${rafLastIntervalMs.value.toFixed(1)} ms` : '-- ms'
+})
+const rafFpsLabel = computed(() => {
+  return rafAverageIntervalMs.value > 0 ? `${Math.round(1000 / rafAverageIntervalMs.value)} fps` : '-- fps'
+})
 
 function getFirstQueryValue(value: unknown) {
   return Array.isArray(value) ? value[0] : value
@@ -174,6 +193,39 @@ function normalizeGameSpeed(value: number) {
   return Math.min(SPEED_MAX, Math.max(SPEED_MIN, Number(roundedValue.toFixed(1))))
 }
 
+function getPreferenceStorage() {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage : null
+  } catch {
+    return null
+  }
+}
+
+function readStoredSpeed() {
+  const rawSpeed = getPreferenceStorage()?.getItem(CHART_PREVIEW_SPEED_STORAGE_KEY)
+  return rawSpeed ? normalizeGameSpeed(Number(rawSpeed)) : DEFAULT_SPEED
+}
+
+function writeStoredSpeed(speed: number) {
+  try {
+    getPreferenceStorage()?.setItem(CHART_PREVIEW_SPEED_STORAGE_KEY, normalizeGameSpeed(speed).toFixed(1))
+  } catch {
+    // Preference persistence is best effort.
+  }
+}
+
+function readStoredReverse() {
+  return getPreferenceStorage()?.getItem(CHART_PREVIEW_REVERSE_STORAGE_KEY) === '1'
+}
+
+function writeStoredReverse(enabled: boolean) {
+  try {
+    getPreferenceStorage()?.setItem(CHART_PREVIEW_REVERSE_STORAGE_KEY, enabled ? '1' : '0')
+  } catch {
+    // Preference persistence is best effort.
+  }
+}
+
 function mapLegacyRenderScaleToGameSpeed(scale: number) {
   return normalizeGameSpeed(scale * 2 + 0.5)
 }
@@ -194,7 +246,7 @@ function resolveRouteSpeed() {
     return mapLegacyRenderScaleToGameSpeed(Number(rawLegacyScale))
   }
 
-  return DEFAULT_SPEED
+  return readStoredSpeed()
 }
 
 function resolveRouteChartMode() {
@@ -219,6 +271,20 @@ function resolveRouteChartMode() {
   return 'XG/Gitadora'
 }
 
+function resolveRouteReverse(instrument: InstrumentKey) {
+  if (instrument === 'drum') {
+    return false
+  }
+
+  const rawReverse = getFirstQueryValue(route.query.reverse)
+
+  if (rawReverse !== undefined && rawReverse !== null) {
+    return rawReverse === '1' || rawReverse === 'true' || rawReverse === 'on'
+  }
+
+  return readStoredReverse()
+}
+
 function formatTime(seconds: number) {
   const safeSeconds = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0))
   const minutes = Math.floor(safeSeconds / 60)
@@ -226,50 +292,41 @@ function formatTime(seconds: number) {
   return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
 }
 
-function isSongLevelAvailable(instrumentKey: InstrumentKey, levelKey: LevelKey) {
-  const instrument = song.value?.instruments.find((candidate) => candidate.key === instrumentKey)
-  const level = instrument?.levels.find((candidate) => candidate.level === levelKey)
-  return level?.available ?? true
-}
-
-function chooseFallbackInstrument(currentSong: SongViewModel, musicId: number) {
+function chooseFallbackInstrument(musicId: number, manifest: DtxChartManifest) {
   const requestedInstrument = getFirstQueryValue(route.query.instrument)
-  const availableInstruments = getAvailableDtxInstruments(musicId)
-  const songInstruments = currentSong.instruments.map((instrument) => instrument.key)
+  const availableInstruments = getAvailableDtxInstruments(musicId, manifest)
 
   if (
     isInstrumentKey(requestedInstrument)
     && availableInstruments.includes(requestedInstrument)
-    && songInstruments.includes(requestedInstrument)
   ) {
     return requestedInstrument
   }
 
   return INSTRUMENT_ORDER.find((instrument) => {
-    return availableInstruments.includes(instrument) && songInstruments.includes(instrument)
+    return availableInstruments.includes(instrument)
   }) ?? availableInstruments[0] ?? 'drum'
 }
 
-function chooseFallbackLevel(musicId: number, instrumentKey: InstrumentKey) {
+function chooseFallbackLevel(musicId: number, instrumentKey: InstrumentKey, manifest = chartManifest.value) {
   const requestedLevel = getFirstQueryValue(route.query.level)
-  const availableLevels = getAvailableDtxLevels(musicId, instrumentKey)
+  const availableLevels = manifest ? getAvailableDtxLevels(musicId, instrumentKey, manifest) : []
 
   if (
     isLevelKey(requestedLevel)
     && availableLevels.includes(requestedLevel)
-    && isSongLevelAvailable(instrumentKey, requestedLevel)
   ) {
     return requestedLevel
   }
 
   return LEVEL_ORDER_DESC.find((level) => {
-    return availableLevels.includes(level) && isSongLevelAvailable(instrumentKey, level)
+    return availableLevels.includes(level)
   }) ?? availableLevels[availableLevels.length - 1] ?? 'master'
 }
 
-async function normalizeRouteSelection(musicId: number, currentSong: SongViewModel) {
-  const instrument = chooseFallbackInstrument(currentSong, musicId)
-  const level = chooseFallbackLevel(musicId, instrument)
+async function normalizeRouteSelection(musicId: number, manifest: DtxChartManifest) {
+  const instrument = chooseFallbackInstrument(musicId, manifest)
+  const level = chooseFallbackLevel(musicId, instrument, manifest)
   const routeInstrument = getFirstQueryValue(route.query.instrument)
   const routeLevel = getFirstQueryValue(route.query.level)
 
@@ -302,7 +359,7 @@ async function loadCurrentChart() {
   errorMessage.value = ''
   preview.value = null
 
-  if (!musicId) {
+  if (musicId === null) {
     errorMessage.value = '歌曲 ID 无效'
     loading.value = false
     return
@@ -321,11 +378,19 @@ async function loadCurrentChart() {
 
     song.value = currentSong
 
-    if (!hasDtxChartSet(musicId)) {
+    const manifest = await loadDtxChartManifest()
+
+    if (currentSequence !== loadSequence) {
+      return
+    }
+
+    chartManifest.value = manifest
+
+    if (!hasLoadedDtxChartSet(musicId, manifest)) {
       throw new Error('暂未收录这首歌的谱面预览')
     }
 
-    const selection = await normalizeRouteSelection(musicId, currentSong)
+    const selection = await normalizeRouteSelection(musicId, manifest)
 
     if (!selection || currentSequence !== loadSequence) {
       return
@@ -335,18 +400,19 @@ async function loadCurrentChart() {
     selectedLevelKey.value = selection.level
     selectedSpeed.value = resolveRouteSpeed()
     selectedChartMode.value = resolveRouteChartMode()
-    pendingInitialProgress = previousPreview?.chart.musicId === musicId
+    reverseEnabled.value = resolveRouteReverse(selection.instrument)
+    playbackProgress.value = previousPreview?.chart.musicId === musicId
       && previousInstrument === selection.instrument
       && previousLevel === selection.level
       ? previousProgress
       : 0
-    hasPendingInitialProgress = true
     preview.value = await loadDtxChartPreview(
       musicId,
       selection.instrument,
       selection.level,
       mapGameSpeedToRenderScale(selectedSpeed.value),
       selectedChartMode.value,
+      reverseEnabled.value,
     )
   } catch (error) {
     if (currentSequence !== loadSequence) {
@@ -369,7 +435,7 @@ async function goBack() {
 
   const musicId = getRouteMusicId()
 
-  if (musicId) {
+  if (musicId !== null) {
     await router.replace({
       name: 'song-detail',
       params: { musicId },
@@ -384,23 +450,35 @@ async function goBack() {
 function updateSelection(instrument: InstrumentKey, level = selectedLevelKey.value) {
   const musicId = getRouteMusicId()
 
-  if (!musicId) {
+  if (musicId === null) {
     return
   }
 
-  const availableLevels = getAvailableDtxLevels(musicId, instrument)
-  const nextLevel = availableLevels.includes(level) && isSongLevelAvailable(instrument, level)
+  const manifest = chartManifest.value
+  const availableInstruments = manifest ? getAvailableDtxInstruments(musicId, manifest) : []
+
+  if (!availableInstruments.includes(instrument)) {
+    return
+  }
+
+  const availableLevels = manifest ? getAvailableDtxLevels(musicId, instrument, manifest) : []
+  const nextLevel = availableLevels.includes(level)
     ? level
-    : chooseFallbackLevel(musicId, instrument)
+    : chooseFallbackLevel(musicId, instrument, manifest)
+  const nextQuery = {
+    ...route.query,
+    instrument,
+    level: nextLevel,
+  }
+
+  if (instrument === 'drum') {
+    Reflect.deleteProperty(nextQuery, 'reverse')
+  }
 
   void router.replace({
     name: 'song-chart',
     params: { musicId },
-    query: {
-      ...route.query,
-      instrument,
-      level: nextLevel,
-    },
+    query: nextQuery,
   })
 }
 
@@ -408,11 +486,12 @@ function updateSpeed(speed: number) {
   const musicId = getRouteMusicId()
   const normalizedSpeed = normalizeGameSpeed(speed)
 
-  if (!musicId || normalizedSpeed === selectedSpeed.value) {
+  if (musicId === null || normalizedSpeed === selectedSpeed.value) {
     return
   }
 
   selectedSpeed.value = normalizedSpeed
+  writeStoredSpeed(normalizedSpeed)
   const nextQuery = {
     ...route.query,
     speed: normalizedSpeed.toFixed(1),
@@ -433,7 +512,7 @@ function adjustSpeed(delta: number) {
 function updateChartMode(chartMode: DtxChartMode) {
   const musicId = getRouteMusicId()
 
-  if (!musicId || chartMode === selectedChartMode.value) {
+  if (musicId === null || chartMode === selectedChartMode.value) {
     return
   }
 
@@ -448,15 +527,41 @@ function updateChartMode(chartMode: DtxChartMode) {
   })
 }
 
+function updateReverse(enabled: boolean) {
+  const musicId = getRouteMusicId()
+
+  if (musicId === null || !canToggleReverse.value || enabled === reverseEnabled.value) {
+    return
+  }
+
+  reverseEnabled.value = enabled
+  writeStoredReverse(enabled)
+  const nextQuery = { ...route.query }
+
+  if (enabled) {
+    nextQuery.reverse = '1'
+  } else {
+    Reflect.deleteProperty(nextQuery, 'reverse')
+  }
+
+  void router.replace({
+    name: 'song-chart',
+    params: { musicId },
+    query: nextQuery,
+  })
+}
+
 function getInstrumentButtonClass(instrument: InstrumentOption) {
   return {
     'chart-preview__panel-button--active': instrument.key === selectedInstrumentKey.value,
+    'chart-preview__panel-button--disabled': !instrument.available,
   }
 }
 
 function getLevelButtonClass(level: LevelOption) {
   return {
     'chart-preview__panel-button--active': level.key === selectedLevelKey.value,
+    'chart-preview__panel-button--disabled': !level.available,
   }
 }
 
@@ -466,55 +571,92 @@ function getChartModeButtonClass(chartMode: DtxChartMode) {
   }
 }
 
-function getViewerMaxScroll() {
-  const viewer = viewerRef.value
-  return viewer ? Math.max(0, viewer.scrollHeight - viewer.clientHeight) : 0
-}
-
 function setViewerProgress(progress: number) {
-  const viewer = viewerRef.value
-  const maxScroll = getViewerMaxScroll()
-  const nextProgress = Math.min(1, Math.max(0, progress))
-
-  playbackProgress.value = nextProgress
-
-  if (!viewer) {
-    return
-  }
-
-  const nextScrollTop = selectedInstrumentKey.value === 'drum'
-    ? maxScroll - maxScroll * nextProgress
-    : maxScroll * nextProgress
-
-  viewer.scrollTop = nextScrollTop
+  playbackProgress.value = Math.min(1, Math.max(0, progress))
 }
 
-function syncPlaybackProgressFromScroll() {
-  const viewer = viewerRef.value
-  const maxScroll = getViewerMaxScroll()
+function seekViewerProgress(progress: number) {
+  setViewerProgress(progress)
 
-  if (!viewer || maxScroll <= 0) {
-    playbackProgress.value = 0
-    return
+  if (playing.value) {
+    playbackStartedAt = performance.now()
+    playbackStartedProgress = playbackProgress.value
   }
-
-  playbackProgress.value = selectedInstrumentKey.value === 'drum'
-    ? Math.min(1, Math.max(0, (maxScroll - viewer.scrollTop) / maxScroll))
-    : Math.min(1, Math.max(0, viewer.scrollTop / maxScroll))
 }
 
-function handleViewerScroll() {
-  const viewer = viewerRef.value
+function getChartPixelsPerSecond() {
+  const currentPreview = preview.value
+  const viewerShell = viewerShellRef.value
 
-  if (!viewer) {
+  if (!currentPreview || !viewerShell) {
+    return 1
+  }
+
+  const bodyWidth = getFullBodyFrameWidth(
+    currentPreview.drawingConfig.gameMode,
+    currentPreview.drawingConfig.chartMode,
+  )
+  const zoom = viewerShell.clientWidth / Math.max(1, bodyWidth)
+
+  return Math.max(1, currentPreview.drawingConfig.scale * REALTIME_BASE_PIXELS_PER_SECOND * zoom)
+}
+
+function seekViewerByPixelDelta(deltaY: number, startProgress = playbackProgress.value) {
+  const duration = preview.value?.dtxJson.songInfo.songDuration ?? 0
+
+  if (duration <= 0) {
     return
   }
 
-  if (playing.value || activeProgressPointerId !== null) {
+  const direction = realtimeReverse.value ? 1 : -1
+  seekViewerProgress(startProgress + direction * deltaY / (duration * getChartPixelsPerSecond()))
+}
+
+function normalizeWheelDeltaY(event: WheelEvent) {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    return event.deltaY * 16
+  }
+
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return event.deltaY * (viewerShellRef.value?.clientHeight ?? 1)
+  }
+
+  return event.deltaY
+}
+
+function handleChartWheel(event: WheelEvent) {
+  event.preventDefault()
+  seekViewerByPixelDelta(normalizeWheelDeltaY(event))
+}
+
+function handleChartPointerDown(event: PointerEvent) {
+  if (event.button !== 0 && event.pointerType === 'mouse') {
     return
   }
 
-  syncPlaybackProgressFromScroll()
+  event.preventDefault()
+  activeChartPointerId = event.pointerId
+  chartDragStartY = event.clientY
+  chartDragStartProgress = playbackProgress.value
+  viewerShellRef.value?.setPointerCapture(event.pointerId)
+}
+
+function handleChartPointerMove(event: PointerEvent) {
+  if (activeChartPointerId !== event.pointerId) {
+    return
+  }
+
+  event.preventDefault()
+  seekViewerByPixelDelta(event.clientY - chartDragStartY, chartDragStartProgress)
+}
+
+function finishChartPointer(event: PointerEvent) {
+  if (activeChartPointerId !== event.pointerId) {
+    return
+  }
+
+  viewerShellRef.value?.releasePointerCapture(event.pointerId)
+  activeChartPointerId = null
 }
 
 function setProgressFromClientX(clientX: number) {
@@ -529,7 +671,7 @@ function setProgressFromClientX(clientX: number) {
   const endX = Math.max(startX, rect.width - PROGRESS_EDGE_INSET_PX)
   const localX = Math.min(endX, Math.max(startX, clientX - rect.left))
   const rangeWidth = Math.max(1, endX - startX)
-  setViewerProgress((localX - startX) / rangeWidth)
+  seekViewerProgress((localX - startX) / rangeWidth)
 }
 
 function handleProgressPointerDown(event: PointerEvent) {
@@ -559,13 +701,13 @@ function finishProgressPointer(event: PointerEvent) {
 function handleProgressKeydown(event: KeyboardEvent) {
   if (event.key === 'Home') {
     event.preventDefault()
-    setViewerProgress(0)
+    seekViewerProgress(0)
     return
   }
 
   if (event.key === 'End') {
     event.preventDefault()
-    setViewerProgress(1)
+    seekViewerProgress(1)
     return
   }
 
@@ -576,41 +718,7 @@ function handleProgressKeydown(event: KeyboardEvent) {
   event.preventDefault()
   const direction = event.key === 'ArrowRight' ? 1 : -1
   const step = event.shiftKey ? 0.1 : 0.02
-  setViewerProgress(playbackProgress.value + direction * step)
-}
-
-function syncViewerWidth() {
-  const viewer = viewerRef.value
-  viewerWidth.value = viewer?.clientWidth ?? 0
-}
-
-function observeViewerElement(element: HTMLElement | null) {
-  viewerResizeObserver?.disconnect()
-  viewerResizeObserver = null
-
-  if (typeof ResizeObserver !== 'undefined' && element) {
-    viewerResizeObserver = new ResizeObserver(() => {
-      syncViewerWidth()
-      if (playing.value) {
-        setViewerProgress(playbackProgress.value)
-      } else {
-        syncPlaybackProgressFromScroll()
-      }
-    })
-    viewerResizeObserver.observe(element)
-  }
-
-  syncViewerWidth()
-}
-
-async function syncInitialScrollPosition() {
-  await nextTick()
-  window.requestAnimationFrame(() => {
-    const nextProgress = hasPendingInitialProgress ? pendingInitialProgress : playbackProgress.value
-    pendingInitialProgress = 0
-    hasPendingInitialProgress = false
-    setViewerProgress(nextProgress)
-  })
+  seekViewerProgress(playbackProgress.value + direction * step)
 }
 
 function stopPlayback() {
@@ -630,7 +738,7 @@ function runPlayback(timestamp: number) {
 
   const duration = preview.value?.dtxJson.songInfo.songDuration ?? 0
 
-  if (!viewerRef.value || getViewerMaxScroll() <= 0 || duration <= 0) {
+  if (!preview.value || duration <= 0) {
     stopPlayback()
     return
   }
@@ -674,6 +782,51 @@ function closeSettingsPanel() {
   settingsPanelOpen.value = false
 }
 
+function resetRafDebugStats() {
+  rafDebugLastTimestamp = 0
+  rafDebugAverageInterval = 0
+  rafAverageIntervalMs.value = 0
+  rafLastIntervalMs.value = 0
+}
+
+function runRafDebugMonitor(timestamp: number) {
+  if (!debugModeEnabled.value) {
+    rafDebugFrame = 0
+    resetRafDebugStats()
+    return
+  }
+
+  if (rafDebugLastTimestamp > 0) {
+    const interval = Math.max(0, timestamp - rafDebugLastTimestamp)
+    rafLastIntervalMs.value = interval
+    rafDebugAverageInterval = rafDebugAverageInterval > 0
+      ? rafDebugAverageInterval * (1 - RAF_DEBUG_SMOOTHING) + interval * RAF_DEBUG_SMOOTHING
+      : interval
+    rafAverageIntervalMs.value = rafDebugAverageInterval
+  }
+
+  rafDebugLastTimestamp = timestamp
+  rafDebugFrame = window.requestAnimationFrame(runRafDebugMonitor)
+}
+
+function startRafDebugMonitor() {
+  if (rafDebugFrame) {
+    return
+  }
+
+  resetRafDebugStats()
+  rafDebugFrame = window.requestAnimationFrame(runRafDebugMonitor)
+}
+
+function stopRafDebugMonitor() {
+  if (rafDebugFrame) {
+    window.cancelAnimationFrame(rafDebugFrame)
+    rafDebugFrame = 0
+  }
+
+  resetRafDebugStats()
+}
+
 watch(
   () => [
     route.params.musicId,
@@ -683,6 +836,7 @@ watch(
     route.query.speed,
     route.query.scale,
     route.query.chartMode,
+    route.query.reverse,
   ],
   () => {
     void loadCurrentChart()
@@ -691,29 +845,28 @@ watch(
 )
 
 watch(
-  () => [preview.value, fitZoom.value, selectedInstrumentKey.value] as const,
+  () => [route.query.reverse, selectedInstrumentKey.value] as const,
   () => {
-    void syncInitialScrollPosition()
+    reverseEnabled.value = resolveRouteReverse(selectedInstrumentKey.value)
   },
-  { flush: 'post' },
 )
 
 watch(
-  viewerRef,
-  (element) => {
-    observeViewerElement(element)
-  },
-  { flush: 'post' },
-)
+  debugModeEnabled,
+  (enabled) => {
+    if (enabled) {
+      startRafDebugMonitor()
+      return
+    }
 
-onMounted(() => {
-  syncViewerWidth()
-})
+    stopRafDebugMonitor()
+  },
+  { immediate: true },
+)
 
 onBeforeUnmount(() => {
   stopPlayback()
-  viewerResizeObserver?.disconnect()
-  viewerResizeObserver = null
+  stopRafDebugMonitor()
 })
 </script>
 
@@ -732,8 +885,13 @@ onBeforeUnmount(() => {
     </header>
 
     <main class="chart-preview__content">
-      <section v-if="loading" class="chart-preview__state">
-        谱面加载中...
+      <section
+        v-if="loading"
+        class="chart-preview__state chart-preview__state--loading"
+        role="status"
+        aria-label="谱面加载中"
+      >
+        <div class="chart-preview__loading-shimmer" aria-hidden="true"></div>
       </section>
 
       <section v-else-if="errorMessage" class="chart-preview__state chart-preview__state--error">
@@ -741,22 +899,34 @@ onBeforeUnmount(() => {
         <button type="button" @click="goBack">返回详情</button>
       </section>
 
-      <section
+      <div
         v-else-if="preview"
-        ref="viewerRef"
-        class="chart-preview__viewer"
+        ref="viewerShellRef"
+        class="chart-preview__viewer-shell"
+        :class="{ 'chart-preview__viewer-shell--dragging': activeChartPointerId !== null }"
         aria-label="谱面画布"
-        @scroll="handleViewerScroll"
+        @pointercancel="finishChartPointer"
+        @pointerdown="handleChartPointerDown"
+        @pointermove="handleChartPointerMove"
+        @pointerup="finishChartPointer"
+        @wheel="handleChartWheel"
       >
-        <div class="chart-preview__viewer-inner">
-          <DtxChartCanvas
-            v-for="(canvasData, index) in preview.canvasData"
-            :key="`${preview.chart.url}-${index}`"
-            :canvas-data="canvasData"
-            :zoom="fitZoom"
-          />
+        <DtxRealtimeCanvas
+          :drawing-config="preview.drawingConfig"
+          :dtx-json="preview.dtxJson"
+          :progress="playbackProgress"
+          :reverse="realtimeReverse"
+        />
+        <div
+          v-if="debugModeEnabled"
+          class="chart-preview__raf-debug"
+          aria-label="rAF interval debug"
+        >
+          <span>{{ rafAverageIntervalLabel }}</span>
+          <strong>{{ rafFpsLabel }}</strong>
+          <small>last {{ rafLastIntervalLabel }}</small>
         </div>
-      </section>
+      </div>
     </main>
 
     <Transition name="chart-preview-scrim">
@@ -780,6 +950,7 @@ onBeforeUnmount(() => {
               class="chart-preview__panel-button"
               :class="getInstrumentButtonClass(instrument)"
               type="button"
+              :disabled="!instrument.available"
               @click="updateSelection(instrument.key)"
             >
               {{ instrument.label }}
@@ -796,6 +967,7 @@ onBeforeUnmount(() => {
               class="chart-preview__panel-button"
               :class="getLevelButtonClass(level)"
               type="button"
+              :disabled="!level.available"
               @click="updateSelection(selectedInstrumentKey, level.key)"
             >
               <span>{{ level.label }}</span>
@@ -804,33 +976,51 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="chart-preview__panel-section">
-          <span>流速</span>
-          <div class="chart-preview__speed-stepper">
-            <button
-              class="chart-preview__speed-button"
-              type="button"
-              :disabled="!canDecreaseSpeed"
-              aria-label="降低流速"
-              @click="adjustSpeed(-SPEED_STEP)"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M15 5L8 12L15 19"></path>
-              </svg>
-            </button>
-            <div class="chart-preview__speed-value" aria-live="polite">
-              {{ selectedSpeed.toFixed(1) }}
+        <div class="chart-preview__panel-row chart-preview__panel-row--speed-reverse">
+          <div class="chart-preview__panel-section">
+            <span>流速</span>
+            <div class="chart-preview__speed-stepper">
+              <button
+                class="chart-preview__speed-button"
+                type="button"
+                :disabled="!canDecreaseSpeed"
+                aria-label="降低流速"
+                @click="adjustSpeed(-SPEED_STEP)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M15 5L8 12L15 19"></path>
+                </svg>
+              </button>
+              <div class="chart-preview__speed-value" aria-live="polite">
+                {{ selectedSpeed.toFixed(1) }}
+              </div>
+              <button
+                class="chart-preview__speed-button"
+                type="button"
+                :disabled="!canIncreaseSpeed"
+                aria-label="提高流速"
+                @click="adjustSpeed(SPEED_STEP)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 5L16 12L9 19"></path>
+                </svg>
+              </button>
             </div>
+          </div>
+
+          <div class="chart-preview__panel-section">
+            <span>反转</span>
             <button
-              class="chart-preview__speed-button"
+              class="chart-preview__reverse-toggle"
               type="button"
-              :disabled="!canIncreaseSpeed"
-              aria-label="提高流速"
-              @click="adjustSpeed(SPEED_STEP)"
+              role="switch"
+              :aria-checked="reverseEnabled"
+              :disabled="!canToggleReverse"
+              @click="updateReverse(!reverseEnabled)"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M9 5L16 12L9 19"></path>
-              </svg>
+              <span class="chart-preview__reverse-toggle-track">
+                <span class="chart-preview__reverse-toggle-thumb"></span>
+              </span>
             </button>
           </div>
         </div>
@@ -907,11 +1097,12 @@ onBeforeUnmount(() => {
   --note-safe-bottom: env(safe-area-inset-bottom, 0px);
   --note-purple: #4b3b76;
   --note-page-width: min(100%, 402px);
+  --note-player-width: 100%;
   --note-topbar-height: calc(var(--note-safe-top) + 70px);
   --note-player-height: calc(var(--note-safe-bottom) + 80px);
   --note-player-back-top: 8px;
   --note-player-panel-bottom: calc(var(--note-player-height) - var(--note-player-back-top));
-  --note-player-cover-overlap: 30px;
+  --note-player-cover-overlap: -7px;
   position: relative;
   height: 100vh;
   overflow: hidden;
@@ -992,25 +1183,54 @@ onBeforeUnmount(() => {
   padding: 19px 20px 0;
 }
 
-.chart-preview__viewer {
+.chart-preview__viewer-shell {
+  position: relative;
   width: 100%;
   height: 100%;
-  overflow: auto;
-  border-radius: 11px;
+  overflow: hidden;
+  border-radius: 11px 11px 0 0;
   background: #000000;
-  scrollbar-width: none;
+  cursor: grab;
+  touch-action: none;
 }
 
-.chart-preview__viewer::-webkit-scrollbar {
-  display: none;
+.chart-preview__viewer-shell--dragging {
+  cursor: grabbing;
 }
 
-.chart-preview__viewer-inner {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  min-height: 100%;
-  line-height: 0;
+.chart-preview__raf-debug {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  display: grid;
+  gap: 2px;
+  min-width: 86px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 7px;
+  background: rgba(24, 19, 37, 0.78);
+  color: #ffffff;
+  font-family: var(--font-figma-title);
+  line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.36);
+}
+
+.chart-preview__raf-debug span {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chart-preview__raf-debug strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.chart-preview__raf-debug small {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 10px;
+  font-weight: 400;
 }
 
 .chart-preview__state {
@@ -1020,6 +1240,40 @@ onBeforeUnmount(() => {
   padding: 28px;
   color: #4a4a4a;
   text-align: center;
+}
+
+.chart-preview__state--loading {
+  align-items: stretch;
+  justify-items: stretch;
+  padding: 0;
+}
+
+.chart-preview__loading-shimmer {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+  border-radius: 11px 11px 0 0;
+  background:
+    linear-gradient(135deg, #d7d3dc 0%, #eeeaf2 45%, #cbc6d1 100%),
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.28), transparent 24%),
+    radial-gradient(circle at 76% 78%, rgba(124, 113, 145, 0.13), transparent 28%);
+}
+
+.chart-preview__loading-shimmer::before {
+  content: '';
+  position: absolute;
+  inset: -35% -70%;
+  z-index: 1;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.6) 50%,
+    transparent 62%
+  );
+  background-repeat: no-repeat;
+  animation: chartPreviewSkeletonSweep 1.25s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 .chart-preview__state--error {
@@ -1048,7 +1302,7 @@ onBeforeUnmount(() => {
   bottom: 0;
   left: 0;
   z-index: 35;
-  width: var(--note-page-width);
+  width: var(--note-player-width);
   height: var(--note-player-height);
   margin: 0 auto;
   background: transparent;
@@ -1182,7 +1436,7 @@ onBeforeUnmount(() => {
   z-index: 34;
   display: grid;
   gap: 14px;
-  width: var(--note-page-width);
+  width: var(--note-player-width);
   margin: 0 auto;
   padding: 18px 20px 20px;
   border-top-left-radius: 20px;
@@ -1194,6 +1448,16 @@ onBeforeUnmount(() => {
 .chart-preview__panel-section {
   display: grid;
   gap: 8px;
+}
+
+.chart-preview__panel-row {
+  display: grid;
+  gap: 10px;
+}
+
+.chart-preview__panel-row--speed-reverse {
+  grid-template-columns: minmax(0, 1fr) 88px;
+  align-items: end;
 }
 
 .chart-preview__panel-section > span {
@@ -1251,6 +1515,15 @@ onBeforeUnmount(() => {
   color: #ffffff;
 }
 
+.chart-preview__panel-button--disabled,
+.chart-preview__panel-button:disabled {
+  border-color: rgba(120, 111, 139, 0.12);
+  background: rgba(217, 211, 224, 0.44);
+  color: #9a93a9;
+  cursor: default;
+  opacity: 1;
+}
+
 .chart-preview__speed-stepper {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 44px;
@@ -1300,6 +1573,57 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
+.chart-preview__reverse-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--note-purple);
+}
+
+.chart-preview__reverse-toggle-track {
+  position: relative;
+  width: 52px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(75, 59, 118, 0.22);
+  transition: background 160ms ease;
+}
+
+.chart-preview__reverse-toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 4px rgba(55, 43, 89, 0.28);
+  transition: transform 160ms ease;
+}
+
+.chart-preview__reverse-toggle[aria-checked="true"] .chart-preview__reverse-toggle-track {
+  background: var(--note-purple);
+}
+
+.chart-preview__reverse-toggle[aria-checked="true"] .chart-preview__reverse-toggle-thumb {
+  transform: translateX(24px);
+}
+
+.chart-preview__reverse-toggle:disabled {
+  color: #948ca7;
+  cursor: default;
+  opacity: 0.72;
+}
+
+.chart-preview__reverse-toggle:disabled .chart-preview__reverse-toggle-track {
+  background: rgba(143, 136, 160, 0.36);
+}
+
 .chart-preview-scrim-enter-active,
 .chart-preview-scrim-leave-active {
   transition: opacity 180ms ease;
@@ -1321,5 +1645,15 @@ onBeforeUnmount(() => {
 .chart-preview-panel-leave-to {
   opacity: 0;
   transform: translateY(18px);
+}
+
+@keyframes chartPreviewSkeletonSweep {
+  from {
+    transform: translate3d(-34%, -18%, 0);
+  }
+
+  to {
+    transform: translate3d(34%, 18%, 0);
+  }
 }
 </style>

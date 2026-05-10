@@ -116,7 +116,18 @@ const selectedHotLabel = computed(() => HOT_FILTER_OPTIONS.find((option) => opti
 const selectedScoreFilterLabel = computed(() => SCORE_FILTER_OPTIONS.find((option) => option.value === selectedScoreFilter.value)?.label ?? '现有曲目')
 const selectedScoreSortLabel = computed(() => SCORE_SORT_OPTIONS.find((option) => option.value === selectedScoreSort.value)?.label ?? 'Skill-降序')
 const selectedFamilyToggleSrc = computed(() => FAMILY_TOGGLE_ASSETS[selectedFamily.value])
-const availableVersionOptions = computed(() => snapshot.value?.availableVersions.slice().sort((left, right) => right - left) ?? [])
+const availableVersionOptions = computed(() => {
+  if (!snapshot.value) {
+    return []
+  }
+
+  const versions = snapshot.value.availableVersions.length > 0
+    ? snapshot.value.availableVersions
+    : [snapshot.value.currentVersion]
+
+  return [...new Set(versions.filter((version) => Number.isFinite(version)))]
+    .sort((left, right) => right - left)
+})
 const selectedMdbVersion = computed(() => snapshot.value?.currentVersion ?? null)
 const versionPanelOptions = computed(() => availableVersionOptions.value.map((version) => ({
   version,
@@ -500,7 +511,7 @@ function cancelSignOut() {
 }
 
 function openVersionSelectPanel() {
-  if (loadingData.value || availableVersionOptions.value.length <= 1) {
+  if (loadingData.value || availableVersionOptions.value.length === 0) {
     return
   }
 
@@ -652,7 +663,12 @@ async function handleOpenPlayHistory() {
 }
 
 function selectMdbVersion(version: number) {
-  if (version === selectedMdbVersion.value || loadingData.value) {
+  if (loadingData.value) {
+    return
+  }
+
+  if (version === selectedMdbVersion.value) {
+    showVersionPanel.value = false
     return
   }
 
@@ -787,7 +803,7 @@ onBeforeUnmount(() => {
                 :display-name="snapshot.gitadoraProfile.name || authUser?.name || 'BJMANIA'"
                 :title="snapshot.gitadoraProfile.title || 'No title'"
                 :mode-label="FAMILY_LABELS[selectedFamily]"
-                :show-version-switch="availableVersionOptions.length > 1"
+                :show-version-switch="availableVersionOptions.length > 0"
                 :skill-value="activeSkillValue"
                 :version-switch-disabled="loadingData"
                 @generate-b50="handleGenerateB50"
@@ -956,10 +972,6 @@ onBeforeUnmount(() => {
                     <strong>{{ debugRow.value }}</strong>
                   </div>
                 </div>
-                <details class="skill-debug-details" open>
-                  <summary>raw best score</summary>
-                  <pre>{{ formatDebugJson(virtualScore.item.rawScore) }}</pre>
-                </details>
               </section>
             </div>
           </div>

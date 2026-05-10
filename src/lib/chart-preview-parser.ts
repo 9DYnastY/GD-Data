@@ -518,53 +518,120 @@ export class DtxFileParser {
   }
 
   private findHoldNotesMatches(laneBarChipsDataArray: LaneBarChipsData[]) {
-    this.matchHoldNotesForPrefix(laneBarChipsDataArray, 'G')
-    this.matchHoldNotesForPrefix(laneBarChipsDataArray, 'B')
-  }
+    let currentGuitarHoldChip: DtxChip | undefined
+    let currentBassHoldChip: DtxChip | undefined
 
-  private matchHoldNotesForPrefix(laneBarChipsDataArray: LaneBarChipsData[], prefix: 'G' | 'B') {
-    let activeHoldChip: DtxChip | null = null
-
-    laneBarChipsDataArray.forEach((laneBarChips) => {
-      const holdMarkers = laneBarChips[`${prefix}Hold`] ?? []
-
-      holdMarkers.forEach((holdMarker) => {
-        const playableAtSameTime = this.findPlayableChipAtSameTime(laneBarChips, holdMarker, prefix)
-
-        if (!activeHoldChip && playableAtSameTime && !isOpenLane(playableAtSameTime.laneType)) {
-          activeHoldChip = playableAtSameTime
-          return
-        }
-
-        if (activeHoldChip && !playableAtSameTime) {
-          activeHoldChip.endLineTimePosition = { ...holdMarker.lineTimePosition }
-          activeHoldChip = null
-        }
-      })
+    laneBarChipsDataArray.forEach((laneBarChips, barIndex) => {
+      currentGuitarHoldChip = this.processHoldNotesInBar('G', laneBarChips, barIndex, currentGuitarHoldChip)
+      currentBassHoldChip = this.processHoldNotesInBar('B', laneBarChips, barIndex, currentBassHoldChip)
     })
   }
 
-  private findPlayableChipAtSameTime(laneBarChips: LaneBarChipsData, holdMarker: DtxChip, prefix: 'G' | 'B') {
+  private searchForGuitarBassChip(
+    laneBarChips: LaneBarChipsData,
+    chipToMatch: DtxChip,
+    prefix: 'G' | 'B',
+    searchInAscendingOrder: boolean,
+    compareLine: (chipLine: number, targetLine: number) => boolean,
+  ) {
     for (const laneType of Object.keys(laneBarChips)) {
       if (!isPlayableGuitarBassLane(laneType, prefix)) {
         continue
       }
 
-      const foundChip = laneBarChips[laneType]?.find((chip) => {
-        return chip.lineTimePosition.barNumber === holdMarker.lineTimePosition.barNumber
-          && chip.lineTimePosition.lineNumberInBar === holdMarker.lineTimePosition.lineNumberInBar
-      })
+      const chips = laneBarChips[laneType] ?? []
+      const startIndex = searchInAscendingOrder ? 0 : chips.length - 1
+      const endIndex = searchInAscendingOrder ? chips.length : -1
+      const step = searchInAscendingOrder ? 1 : -1
 
-      if (foundChip) {
-        return foundChip
+      for (let index = startIndex; index !== endIndex; index += step) {
+        const chip = chips[index]
+
+        if (!chip || chip.lineTimePosition.barNumber !== chipToMatch.lineTimePosition.barNumber) {
+          continue
+        }
+
+        if (compareLine(chip.lineTimePosition.lineNumberInBar, chipToMatch.lineTimePosition.lineNumberInBar)) {
+          return chip
+        }
       }
     }
 
-    return null
+    return undefined
+  }
+
+  private processHoldNotesInBar(
+    prefix: 'G' | 'B',
+    laneBarChips: LaneBarChipsData,
+    barIndex: number,
+    currentHoldChip: DtxChip | undefined,
+  ) {
+    let activeHoldChip = currentHoldChip
+    const holdMarkers = laneBarChips[`${prefix}Hold`] ?? []
+
+    holdMarkers.forEach((holdMarker) => {
+      if (!activeHoldChip) {
+        const startChip = this.searchForGuitarBassChip(
+          laneBarChips,
+          holdMarker,
+          prefix,
+          true,
+          (chipLine, markerLine) => chipLine === markerLine,
+        )
+
+        if (startChip && !isOpenLane(startChip.laneType)) {
+          activeHoldChip = startChip
+        }
+
+        return
+      }
+
+      const nearestChipBeforeEnd = this.searchForGuitarBassChip(
+        laneBarChips,
+        holdMarker,
+        prefix,
+        false,
+        (chipLine, markerLine) => chipLine <= markerLine,
+      )
+      const isSameAsStartChip = nearestChipBeforeEnd
+        && nearestChipBeforeEnd.lineTimePosition.barNumber === activeHoldChip.lineTimePosition.barNumber
+        && nearestChipBeforeEnd.lineTimePosition.lineNumberInBar === activeHoldChip.lineTimePosition.lineNumberInBar
+
+      if (!nearestChipBeforeEnd || isSameAsStartChip) {
+        activeHoldChip.endLineTimePosition = { ...holdMarker.lineTimePosition }
+      }
+
+      activeHoldChip = undefined
+    })
+
+    if (!activeHoldChip) {
+      return undefined
+    }
+
+    let chipToMatch: DtxChip = {
+      lineTimePosition: { barNumber: barIndex, lineNumberInBar: 0, timePosition: 0 },
+      chipCode: '01',
+      laneType: 'Bar',
+    }
+    let compareLine = (chipLine: number, targetLine: number) => chipLine >= targetLine
+
+    if (activeHoldChip.lineTimePosition.barNumber === barIndex) {
+      chipToMatch = activeHoldChip
+      compareLine = (chipLine: number, targetLine: number) => chipLine > targetLine
+    }
+
+    const chipAfterStartBeforeEnd = this.searchForGuitarBassChip(
+      laneBarChips,
+      chipToMatch,
+      prefix,
+      true,
+      compareLine,
+    )
+
+    return chipAfterStartBeforeEnd ? undefined : activeHoldChip
   }
 
   private flattenAllChipsIntoSingleArray(laneBarChipsDataArray: LaneBarChipsData[]) {
     return laneBarChipsDataArray.flatMap((laneBarChips) => Object.values(laneBarChips).flat())
   }
 }
-
