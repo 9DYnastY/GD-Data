@@ -13,6 +13,12 @@ dist-ssr
 *.local
 .gradle-user/
 android/app/release/
+android/app/src/main/assets/public/
+.uv-cache-*/
+
+# Cache
+.vite-dev.err.log
+.vite-dev.log
 
 # Editor directories and files
 .vscode/*

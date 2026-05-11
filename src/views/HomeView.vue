@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Capacitor } from '@capacitor/core'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import DifficultyRangeSlider from '../components/DifficultyRangeSlider.vue'
@@ -66,6 +67,7 @@ const INSTRUMENT_TOGGLE_ASSETS: Record<InstrumentKey, string> = {
 }
 const router = useRouter()
 const debugModeEnabled = useDebugMode()
+const showNativeSettingsEntry = computed(() => Capacitor.getPlatform() !== 'web')
 const GF_VERSION_MAP: Record<number, string> = {
   0: 'GF1st',
   1: 'GF2nd',
@@ -751,7 +753,7 @@ function compareMasterDifficulty(
   <section class="home-view">
     <header ref="topShellRef" class="top-shell">
       <div class="top-shell__purple">
-        <div class="top-shell__bar top-shell__bar--home">
+        <div class="top-shell__bar" :class="{ 'top-shell__bar--with-settings': showNativeSettingsEntry }">
           <label class="search-shell">
             <input
               ref="searchInputRef"
@@ -777,6 +779,7 @@ function compareMasterDifficulty(
           </label>
 
           <button
+            v-if="showNativeSettingsEntry"
             class="settings-badge"
             type="button"
             aria-label="打开软件设置"
@@ -1041,7 +1044,7 @@ function compareMasterDifficulty(
   padding: var(--home-top-bar-padding) 11px 15px;
 }
 
-.top-shell__bar--home {
+.top-shell__bar--with-settings {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;

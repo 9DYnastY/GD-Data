@@ -22,14 +22,28 @@ export interface DtxChartManifest {
   charts: Record<string, DtxInstrumentFileMap>
 }
 
+interface DtxChartManifestLatest {
+  schemaVersion: 1
+  publishedAt: string
+  manifestKey: string
+  manifestUrl: string
+  manifestSize: number
+  musicCount: number
+  chartCount: number
+}
+
 interface CachedDtxChartManifestRecord {
   id: string
   schemaVersion: 1
   cachedAt: string
+  manifestKey?: string
+  manifestUrl?: string
+  publishedAt?: string
   manifest: DtxChartManifest
 }
 
-const DTX_MANIFEST_URL = 'https://gitadora.selundine.top/dtx/manifest.json'
+const DTX_MANIFEST_LATEST_URL = 'https://gitadora.selundine.top/dtx/manifest.latest.json'
+const DTX_LEGACY_MANIFEST_URL = 'https://gitadora.selundine.top/dtx/manifest.json'
 const DTX_MANIFEST_CACHE_DB_NAME = 'gitadora-dtx-chart-manifest'
 const DTX_MANIFEST_CACHE_DB_VERSION = 1
 const DTX_MANIFEST_CACHE_STORE = 'manifests'
@@ -137,6 +151,40 @@ function normalizeManifest(value: unknown): DtxChartManifest {
   }
 }
 
+function normalizeManifestLatest(value: unknown): DtxChartManifestLatest {
+  if (!isObject(value) || value.schemaVersion !== 1) {
+    throw new Error('谱面库 latest manifest 格式无效')
+  }
+
+  const publishedAt = value.publishedAt
+  const manifestKey = value.manifestKey
+  const manifestUrl = value.manifestUrl
+  const manifestSize = value.manifestSize
+  const musicCount = value.musicCount
+  const chartCount = value.chartCount
+
+  if (
+    typeof publishedAt !== 'string'
+    || typeof manifestKey !== 'string'
+    || typeof manifestUrl !== 'string'
+    || typeof manifestSize !== 'number'
+    || typeof musicCount !== 'number'
+    || typeof chartCount !== 'number'
+  ) {
+    throw new Error('谱面库 latest manifest 格式无效')
+  }
+
+  return {
+    schemaVersion: 1,
+    publishedAt,
+    manifestKey,
+    manifestUrl,
+    manifestSize,
+    musicCount,
+    chartCount,
+  }
+}
+
 function openDtxChartManifestCacheDb() {
   if (typeof indexedDB === 'undefined') {
     return Promise.resolve(null)
@@ -164,7 +212,7 @@ async function readCachedDtxChartManifest() {
     return null
   }
 
-  return await new Promise<DtxChartManifest | null>((resolve, reject) => {
+  return await new Promise<CachedDtxChartManifestRecord | null>((resolve, reject) => {
     const transaction = db.transaction(DTX_MANIFEST_CACHE_STORE, 'readonly')
     const request = transaction.objectStore(DTX_MANIFEST_CACHE_STORE).get(DTX_MANIFEST_CACHE_KEY)
 
@@ -177,7 +225,16 @@ async function readCachedDtxChartManifest() {
       }
 
       try {
-        resolve(normalizeManifest(record.manifest))
+        const manifest = normalizeManifest(record.manifest)
+        resolve({
+          id: DTX_MANIFEST_CACHE_KEY,
+          schemaVersion: 1,
+          cachedAt: typeof record.cachedAt === 'string' ? record.cachedAt : '',
+          manifestKey: typeof record.manifestKey === 'string' ? record.manifestKey : undefined,
+          manifestUrl: typeof record.manifestUrl === 'string' ? record.manifestUrl : undefined,
+          publishedAt: typeof record.publishedAt === 'string' ? record.publishedAt : manifest.publishedAt,
+          manifest,
+        })
       } catch {
         resolve(null)
       }
@@ -191,7 +248,7 @@ async function readCachedDtxChartManifest() {
   })
 }
 
-async function writeCachedDtxChartManifest(manifest: DtxChartManifest) {
+async function writeCachedDtxChartManifest(manifest: DtxChartManifest, latest?: DtxChartManifestLatest) {
   const db = await openDtxChartManifestCacheDb()
 
   if (!db) {
@@ -204,6 +261,9 @@ async function writeCachedDtxChartManifest(manifest: DtxChartManifest) {
       id: DTX_MANIFEST_CACHE_KEY,
       schemaVersion: 1,
       cachedAt: new Date().toISOString(),
+      manifestKey: latest?.manifestKey,
+      manifestUrl: latest?.manifestUrl,
+      publishedAt: latest?.publishedAt ?? manifest.publishedAt,
       manifest,
     } satisfies CachedDtxChartManifestRecord)
     transaction.oncomplete = () => {
@@ -217,8 +277,18 @@ async function writeCachedDtxChartManifest(manifest: DtxChartManifest) {
   })
 }
 
-async function fetchRemoteDtxChartManifest() {
-  const response = await fetch(DTX_MANIFEST_URL, { cache: 'no-store' })
+async function fetchDtxChartManifestLatest() {
+  const response = await fetch(DTX_MANIFEST_LATEST_URL, { cache: 'no-store' })
+
+  if (!response.ok) {
+    throw new Error(`谱面库 latest manifest 加载失败 (${response.status})`)
+  }
+
+  return normalizeManifestLatest(await response.json())
+}
+
+async function fetchRemoteDtxChartManifest(url: string, latest?: DtxChartManifestLatest) {
+  const response = await fetch(url, { cache: 'no-store' })
 
   if (!response.ok) {
     throw new Error(`谱面库 manifest 加载失败 (${response.status})`)
@@ -227,7 +297,7 @@ async function fetchRemoteDtxChartManifest() {
   const manifest = normalizeManifest(await response.json())
 
   try {
-    await writeCachedDtxChartManifest(manifest)
+    await writeCachedDtxChartManifest(manifest, latest)
   } catch {
     // Persistent caching is best effort; the in-memory manifest can still be used.
   }
@@ -242,8 +312,48 @@ export async function loadDtxChartManifest() {
 
   if (!manifestPromise) {
     manifestPromise = (async () => {
-      const cachedManifest = await readCachedDtxChartManifest().catch(() => null)
-      const manifest = cachedManifest ?? await fetchRemoteDtxChartManifest()
+      const cachedRecord = await readCachedDtxChartManifest().catch(() => null)
+      const latest = await fetchDtxChartManifestLatest().catch(() => null)
+
+      if (latest) {
+        const cachedManifest = cachedRecord?.manifest ?? null
+
+        if (
+          cachedManifest
+          && (
+            cachedRecord?.manifestKey === latest.manifestKey
+            || cachedRecord?.publishedAt === latest.publishedAt
+            || cachedManifest.publishedAt === latest.publishedAt
+          )
+        ) {
+          if (cachedRecord?.manifestKey !== latest.manifestKey) {
+            void writeCachedDtxChartManifest(cachedManifest, latest).catch(() => {})
+          }
+
+          activeManifest = cachedManifest
+          return cachedManifest
+        }
+
+        try {
+          const manifest = await fetchRemoteDtxChartManifest(latest.manifestUrl, latest)
+          activeManifest = manifest
+          return manifest
+        } catch (error) {
+          if (cachedManifest) {
+            activeManifest = cachedManifest
+            return cachedManifest
+          }
+
+          throw error
+        }
+      }
+
+      if (cachedRecord?.manifest) {
+        activeManifest = cachedRecord.manifest
+        return cachedRecord.manifest
+      }
+
+      const manifest = await fetchRemoteDtxChartManifest(DTX_LEGACY_MANIFEST_URL)
       activeManifest = manifest
       return manifest
     })().catch((error) => {

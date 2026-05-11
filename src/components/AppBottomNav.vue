@@ -1,19 +1,27 @@
 <script setup lang="ts">
+import { Capacitor } from '@capacitor/core'
 import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
 const route = useRoute()
 
-const items = [
-  { name: 'home', label: '曲库', to: '/' },
-  { name: 'skill', label: 'SKILL', to: '/skill' },
-]
+const items = computed(() => {
+  const baseItems = [
+    { name: 'home', label: '曲库', to: '/' },
+  ]
+
+  if (Capacitor.getPlatform() !== 'web') {
+    baseItems.push({ name: 'skill', label: 'SKILL', to: '/skill' })
+  }
+
+  return baseItems
+})
 
 const activeName = computed(() => String(route.name ?? ''))
 </script>
 
 <template>
-  <nav class="bottom-nav" aria-label="Primary">
+  <nav class="bottom-nav" :class="{ 'bottom-nav--single': items.length === 1 }" aria-label="Primary">
     <RouterLink
       v-for="item in items"
       :key="item.name"
@@ -56,6 +64,10 @@ const activeName = computed(() => String(route.name ?? ''))
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 -10px 26px rgba(69, 55, 118, 0.18);
   backdrop-filter: blur(12px);
+}
+
+.bottom-nav--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .bottom-nav__item {
