@@ -24,7 +24,6 @@ android/app/src/main/assets/public/
 .vscode/*
 .codex/*
 .planning/*
-!.vscode/extensions.json
 .idea
 .DS_Store
 *.suo
