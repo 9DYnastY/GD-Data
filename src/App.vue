@@ -539,9 +539,7 @@ onBeforeUnmount(() => {
 
 .app-background__overlay {
   z-index: 1;
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.48)),
-    radial-gradient(circle at top, rgba(111, 88, 188, 0.16), transparent 30%);
+  background: rgba(128, 128, 128, 0.4);
 }
 
 .exit-toast {

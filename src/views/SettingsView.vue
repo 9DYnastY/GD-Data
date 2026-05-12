@@ -217,12 +217,20 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- <button class="settings-row settings-row--button" type="button" disabled>
+        <a
+          class="settings-row settings-row--link"
+          href="https://github.com/9DYnastY/GD-Data"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="打开项目主页"
+        >
           <div class="settings-row__text">
             <span class="settings-row__label">项目主页</span>
           </div>
-          <span class="settings-row__chevron">›</span>
-        </button> -->
+          <svg class="settings-row__github-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.09 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2.04c-3.2.7-3.88-1.38-3.88-1.38-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18A10.9 10.9 0 0 1 12 6.12c.98 0 1.96.13 2.88.38 2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.13v3.08c0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"></path>
+          </svg>
+        </a>
       </section>
 
       <p v-if="successMessage" class="settings-message settings-message--success">{{ successMessage }}</p>
@@ -351,6 +359,18 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.settings-row--link {
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-row--link:focus-visible {
+  outline: none;
+  background: rgba(232, 222, 248, 0.38);
+  box-shadow: inset 0 0 0 3px rgba(79, 55, 138, 0.12);
+}
+
 .settings-row--button:disabled {
   opacity: 1;
   cursor: default;
@@ -422,6 +442,14 @@ onBeforeUnmount(() => {
   font-family: var(--font-sans);
   font-size: 1.6rem;
   line-height: 1;
+}
+
+.settings-row__github-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  color: #4f378a;
+  fill: currentColor;
 }
 
 .settings-message {
