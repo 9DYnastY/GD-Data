@@ -9,7 +9,6 @@ import {
 import {
   CHIP_COLOR_INFO,
   drawProgrammaticHoldRect,
-  drawProgrammaticWailChip,
   getLoadedChartImage,
 } from './chart-preview-renderer'
 import type { DtxBpmSegment, DtxChip, DtxDrawingConfig, DtxJson, DtxLine, DtxRect } from './chart-preview-types'
@@ -217,16 +216,6 @@ function drawChip(
   fallbackHeight: number,
   zoom: number,
 ) {
-  if (laneName === 'Wail') {
-    drawProgrammaticWailChip(context, {
-      posX: x,
-      posY: centerY - fallbackHeight / 2,
-      width: fallbackWidth,
-      height: fallbackHeight,
-    })
-    return
-  }
-
   const image = getLoadedChartImage(laneName)
 
   if (image) {

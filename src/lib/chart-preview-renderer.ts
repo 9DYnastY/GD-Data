@@ -28,7 +28,7 @@ export const CHIP_COLOR_INFO: Record<string, string> = {
   Pink: '#ff62cf',
   Open: '#ffffff',
   OpenV: '#ffffff',
-  Wail: '#38f04f',
+  Wail: '#c9c9ff',
 }
 
 export const HOLD_COLOR_INFO: Record<string, string> = {
@@ -56,6 +56,7 @@ const ASSET_URLS: Record<string, string> = {
   Blue: new URL('../assets/chart-preview/blue_gfchip.png', import.meta.url).href,
   Yellow: new URL('../assets/chart-preview/yellow_gfchip.png', import.meta.url).href,
   Pink: new URL('../assets/chart-preview/mag_gfchip.png', import.meta.url).href,
+  Wail: new URL('../assets/chart-preview/wail_gfchip.png', import.meta.url).href,
   Open: new URL('../assets/chart-preview/open_gfchip.png', import.meta.url).href,
   OpenV: new URL('../assets/chart-preview/open_gfvchip.png', import.meta.url).href,
 }
@@ -159,37 +160,6 @@ export function drawProgrammaticHoldRect(context: CanvasRenderingContext2D, name
   context.restore()
 }
 
-export function drawProgrammaticWailChip(context: CanvasRenderingContext2D, rect: DtxRect) {
-  if (rect.width <= 0 || rect.height <= 0) {
-    return
-  }
-
-  const scale = 0.86
-  const width = rect.width * scale
-  const height = rect.height * scale
-  const left = rect.posX + (rect.width - width) / 2
-  const top = rect.posY + (rect.height - height) / 2
-  const right = left + width
-  const bottom = top + height
-  const centerX = left + width / 2
-  const headBaseY = top + height * 0.43
-  const stemInsetX = width * 0.33
-
-  context.save()
-  context.beginPath()
-  context.moveTo(centerX, top + height * 0.03)
-  context.lineTo(right - width * 0.03, headBaseY)
-  context.lineTo(right - stemInsetX, headBaseY)
-  context.lineTo(right - stemInsetX, bottom - height * 0.04)
-  context.lineTo(left + stemInsetX, bottom - height * 0.04)
-  context.lineTo(left + stemInsetX, headBaseY)
-  context.lineTo(left + width * 0.03, headBaseY)
-  context.closePath()
-  context.fillStyle = '#25cf38'
-  context.fill()
-  context.restore()
-}
-
 function drawFrameRect(context: CanvasRenderingContext2D, rect: DtxRect) {
   drawRect(
     context,
@@ -233,16 +203,6 @@ function drawText(context: CanvasRenderingContext2D, textPos: DtxTextRectPos) {
 }
 
 async function drawChip(context: CanvasRenderingContext2D, chip: DtxChipPixelRectPos) {
-  if (chip.laneType === 'Wail') {
-    drawProgrammaticWailChip(context, {
-      posX: chip.rectPos.posX,
-      posY: chip.rectPos.posY - chip.rectPos.height / 2,
-      width: chip.rectPos.width,
-      height: chip.rectPos.height,
-    })
-    return
-  }
-
   const image = await loadChartImage(chip.laneType)
 
   if (!image) {
