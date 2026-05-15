@@ -826,9 +826,6 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="song-detail__chart-section" aria-label="谱面信息">
-          <div class="song-detail__section-heading">
-            <span>Skill</span>
-          </div>
 
           <div class="song-detail__instrument-tabs" role="tablist" aria-label="选择乐器">
             <button

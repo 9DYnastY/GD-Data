@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import DtxChartCanvas from '../components/DtxChartCanvas.vue'
 import DtxRealtimeCanvas from '../components/DtxRealtimeCanvas.vue'
 import menuIconSrc from '../assets/chart-preview/note-menu.png'
 import pauseIconSrc from '../assets/chart-preview/note-pause.png'
@@ -38,6 +39,35 @@ interface ChartModeOption {
   label: string
 }
 
+type ChartRenderMode = 'realtime' | 'static'
+
+interface StaticPointerPosition {
+  x: number
+  y: number
+}
+
+interface StaticPanGesture {
+  type: 'pan'
+  pointerId: number
+  startX: number
+  startY: number
+  startPanX: number
+  startPanY: number
+}
+
+interface StaticPinchGesture {
+  type: 'pinch'
+  startDistance: number
+  startMidX: number
+  startMidY: number
+  startPanX: number
+  startPanY: number
+  startZoom: number
+  startCanvasZoom: number
+}
+
+type StaticGesture = StaticPanGesture | StaticPinchGesture
+
 const route = useRoute()
 const router = useRouter()
 const debugModeEnabled = useDebugMode()
@@ -50,11 +80,20 @@ const errorMessage = ref('')
 const selectedInstrumentKey = ref<InstrumentKey>('drum')
 const selectedLevelKey = ref<LevelKey>('master')
 const selectedSpeed = ref(4)
+const selectedBarsPerColumn = ref(5)
 const selectedChartMode = ref<DtxChartMode>('XG/Gitadora')
 const reverseEnabled = ref(false)
 const viewerShellRef = ref<HTMLElement | null>(null)
 const progressShellRef = ref<HTMLElement | null>(null)
+const viewerShellSize = ref({ width: 0, height: 0 })
 const settingsPanelOpen = ref(false)
+const chartRenderMode = ref<ChartRenderMode>('realtime')
+const dynamicDragging = ref(false)
+const staticDragging = ref(false)
+const staticZoom = ref(1)
+const staticRenderedZoom = ref(1)
+const staticPanX = ref(0)
+const staticPanY = ref(0)
 const playing = ref(false)
 const playbackProgress = ref(0)
 const rafAverageIntervalMs = ref(0)
@@ -70,6 +109,10 @@ let activeProgressPointerId: number | null = null
 let activeChartPointerId: number | null = null
 let chartDragStartProgress = 0
 let chartDragStartY = 0
+let viewerResizeObserver: ResizeObserver | null = null
+let staticGesture: StaticGesture | null = null
+let staticZoomCommitTimer: number | null = null
+const staticPointers = new Map<number, StaticPointerPosition>()
 
 const INSTRUMENT_LABELS: Record<InstrumentKey, string> = {
   drum: 'Drum',
@@ -95,7 +138,14 @@ const SPEED_MIN = 1
 const SPEED_MAX = 9.5
 const SPEED_STEP = 0.5
 const DEFAULT_SPEED = 4
+const BARS_PER_COLUMN_MIN = 3
+const BARS_PER_COLUMN_MAX = 10
+const BARS_PER_COLUMN_STEP = 1
+const DEFAULT_BARS_PER_COLUMN = 5
+const STATIC_ZOOM_MIN = 0.25
+const STATIC_ZOOM_MAX = 5
 const CHART_PREVIEW_SPEED_STORAGE_KEY = 'gddata.chartPreview.speed'
+const CHART_PREVIEW_BARS_PER_COLUMN_STORAGE_KEY = 'gddata.chartPreview.barsPerColumn'
 const CHART_PREVIEW_REVERSE_STORAGE_KEY = 'gddata.chartPreview.reverse'
 const PROGRESS_RANGE_MAX = 1000
 const PROGRESS_EDGE_INSET_PX = 20
@@ -145,6 +195,13 @@ const currentTimeLabel = computed(() => {
 })
 const canDecreaseSpeed = computed(() => selectedSpeed.value > SPEED_MIN)
 const canIncreaseSpeed = computed(() => selectedSpeed.value < SPEED_MAX)
+const canAdjustBarsPerColumn = computed(() => chartRenderMode.value === 'static')
+const canDecreaseBarsPerColumn = computed(() => {
+  return canAdjustBarsPerColumn.value && selectedBarsPerColumn.value > BARS_PER_COLUMN_MIN
+})
+const canIncreaseBarsPerColumn = computed(() => {
+  return canAdjustBarsPerColumn.value && selectedBarsPerColumn.value < BARS_PER_COLUMN_MAX
+})
 const canToggleReverse = computed(() => selectedInstrumentKey.value !== 'drum')
 const realtimeReverse = computed(() => selectedInstrumentKey.value === 'drum' || reverseEnabled.value)
 const rafAverageIntervalLabel = computed(() => {
@@ -155,6 +212,41 @@ const rafLastIntervalLabel = computed(() => {
 })
 const rafFpsLabel = computed(() => {
   return rafAverageIntervalMs.value > 0 ? `${Math.round(1000 / rafAverageIntervalMs.value)} fps` : '-- fps'
+})
+const chartDragging = computed(() => {
+  return chartRenderMode.value === 'static' ? staticDragging.value : dynamicDragging.value
+})
+const dynamicChartEnabled = computed(() => {
+  return chartRenderMode.value === 'realtime'
+})
+const playbackDisabled = computed(() => {
+  return chartRenderMode.value === 'static'
+})
+const staticFitZoom = computed(() => {
+  const canvasWidth = preview.value?.canvasData[0]?.canvasSize.width ?? 0
+
+  if (canvasWidth <= 0 || viewerShellSize.value.width <= 0) {
+    return 1
+  }
+
+  return viewerShellSize.value.width / canvasWidth
+})
+const staticCanvasZoom = computed(() => {
+  return staticFitZoom.value * staticRenderedZoom.value
+})
+const staticDisplayCanvasZoom = computed(() => {
+  return staticFitZoom.value * staticZoom.value
+})
+const staticStackScale = computed(() => {
+  return staticZoom.value / Math.max(0.001, staticRenderedZoom.value)
+})
+const staticStackStyle = computed(() => {
+  const scale = Math.max(0.001, staticStackScale.value)
+
+  return {
+    gap: `${10 / scale}px`,
+    transform: `translate3d(${staticPanX.value}px, ${staticPanY.value}px, 0) scale(${scale})`,
+  }
 })
 
 function getFirstQueryValue(value: unknown) {
@@ -193,6 +285,15 @@ function normalizeGameSpeed(value: number) {
   return Math.min(SPEED_MAX, Math.max(SPEED_MIN, Number(roundedValue.toFixed(1))))
 }
 
+function normalizeBarsPerColumn(value: number) {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_BARS_PER_COLUMN
+  }
+
+  const roundedValue = Math.round(value / BARS_PER_COLUMN_STEP) * BARS_PER_COLUMN_STEP
+  return Math.min(BARS_PER_COLUMN_MAX, Math.max(BARS_PER_COLUMN_MIN, roundedValue))
+}
+
 function getPreferenceStorage() {
   try {
     return typeof window !== 'undefined' ? window.localStorage : null
@@ -209,6 +310,22 @@ function readStoredSpeed() {
 function writeStoredSpeed(speed: number) {
   try {
     getPreferenceStorage()?.setItem(CHART_PREVIEW_SPEED_STORAGE_KEY, normalizeGameSpeed(speed).toFixed(1))
+  } catch {
+    // Preference persistence is best effort.
+  }
+}
+
+function readStoredBarsPerColumn() {
+  const rawBarsPerColumn = getPreferenceStorage()?.getItem(CHART_PREVIEW_BARS_PER_COLUMN_STORAGE_KEY)
+  return rawBarsPerColumn ? normalizeBarsPerColumn(Number(rawBarsPerColumn)) : DEFAULT_BARS_PER_COLUMN
+}
+
+function writeStoredBarsPerColumn(barsPerColumn: number) {
+  try {
+    getPreferenceStorage()?.setItem(
+      CHART_PREVIEW_BARS_PER_COLUMN_STORAGE_KEY,
+      normalizeBarsPerColumn(barsPerColumn).toString(),
+    )
   } catch {
     // Preference persistence is best effort.
   }
@@ -247,6 +364,11 @@ function resolveRouteSpeed() {
   }
 
   return readStoredSpeed()
+}
+
+function resolveRouteBarsPerColumn() {
+  const rawBarsPerColumn = getFirstQueryValue(route.query.barsPerColumn)
+  return rawBarsPerColumn ? normalizeBarsPerColumn(Number(rawBarsPerColumn)) : readStoredBarsPerColumn()
 }
 
 function resolveRouteChartMode() {
@@ -399,6 +521,7 @@ async function loadCurrentChart() {
     selectedInstrumentKey.value = selection.instrument
     selectedLevelKey.value = selection.level
     selectedSpeed.value = resolveRouteSpeed()
+    selectedBarsPerColumn.value = resolveRouteBarsPerColumn()
     selectedChartMode.value = resolveRouteChartMode()
     reverseEnabled.value = resolveRouteReverse(selection.instrument)
     playbackProgress.value = previousPreview?.chart.musicId === musicId
@@ -406,14 +529,22 @@ async function loadCurrentChart() {
       && previousLevel === selection.level
       ? previousProgress
       : 0
-    preview.value = await loadDtxChartPreview(
+    const loadedPreview = await loadDtxChartPreview(
       musicId,
       selection.instrument,
       selection.level,
       mapGameSpeedToRenderScale(selectedSpeed.value),
       selectedChartMode.value,
       reverseEnabled.value,
+      selectedBarsPerColumn.value,
     )
+
+    if (currentSequence !== loadSequence) {
+      return
+    }
+
+    preview.value = loadedPreview
+    resetStaticViewport()
   } catch (error) {
     if (currentSequence !== loadSequence) {
       return
@@ -509,6 +640,35 @@ function adjustSpeed(delta: number) {
   updateSpeed(selectedSpeed.value + delta)
 }
 
+function updateBarsPerColumn(barsPerColumn: number) {
+  const musicId = getRouteMusicId()
+  const normalizedBarsPerColumn = normalizeBarsPerColumn(barsPerColumn)
+
+  if (
+    musicId === null
+    || !canAdjustBarsPerColumn.value
+    || normalizedBarsPerColumn === selectedBarsPerColumn.value
+  ) {
+    return
+  }
+
+  selectedBarsPerColumn.value = normalizedBarsPerColumn
+  writeStoredBarsPerColumn(normalizedBarsPerColumn)
+
+  void router.replace({
+    name: 'song-chart',
+    params: { musicId },
+    query: {
+      ...route.query,
+      barsPerColumn: normalizedBarsPerColumn.toString(),
+    },
+  })
+}
+
+function adjustBarsPerColumn(delta: number) {
+  updateBarsPerColumn(selectedBarsPerColumn.value + delta)
+}
+
 function updateChartMode(chartMode: DtxChartMode) {
   const musicId = getRouteMusicId()
 
@@ -536,12 +696,19 @@ function updateReverse(enabled: boolean) {
 
   reverseEnabled.value = enabled
   writeStoredReverse(enabled)
+  const currentReverseQuery = getFirstQueryValue(route.query.reverse)
+  const hasReverseQuery = currentReverseQuery !== undefined && currentReverseQuery !== null
   const nextQuery = { ...route.query }
 
   if (enabled) {
     nextQuery.reverse = '1'
   } else {
     Reflect.deleteProperty(nextQuery, 'reverse')
+  }
+
+  if (!enabled && !hasReverseQuery) {
+    void loadCurrentChart()
+    return
   }
 
   void router.replace({
@@ -569,6 +736,280 @@ function getChartModeButtonClass(chartMode: DtxChartMode) {
   return {
     'chart-preview__panel-button--active': chartMode === selectedChartMode.value,
   }
+}
+
+function normalizeStaticZoom(value: number) {
+  if (!Number.isFinite(value)) {
+    return 1
+  }
+
+  return Math.min(STATIC_ZOOM_MAX, Math.max(STATIC_ZOOM_MIN, value))
+}
+
+function clearStaticZoomCommit() {
+  if (staticZoomCommitTimer === null) {
+    return
+  }
+
+  window.clearTimeout(staticZoomCommitTimer)
+  staticZoomCommitTimer = null
+}
+
+function commitStaticZoomToCanvas() {
+  clearStaticZoomCommit()
+  staticRenderedZoom.value = staticZoom.value
+}
+
+function scheduleStaticZoomCommit(delayMs = 140) {
+  clearStaticZoomCommit()
+  staticZoomCommitTimer = window.setTimeout(() => {
+    commitStaticZoomToCanvas()
+  }, delayMs)
+}
+
+function resetStaticGesture() {
+  staticGesture = null
+  staticPointers.clear()
+  staticDragging.value = false
+}
+
+function resetStaticViewport() {
+  clearStaticZoomCommit()
+  resetStaticGesture()
+  staticZoom.value = 1
+  staticRenderedZoom.value = 1
+  staticPanX.value = 0
+  staticPanY.value = 0
+}
+
+function updateViewerShellSize() {
+  const viewerShell = viewerShellRef.value
+
+  if (!viewerShell) {
+    viewerShellSize.value = { width: 0, height: 0 }
+    return
+  }
+
+  viewerShellSize.value = {
+    width: viewerShell.clientWidth,
+    height: viewerShell.clientHeight,
+  }
+}
+
+function getStaticLocalPoint(clientX: number, clientY: number) {
+  const rect = viewerShellRef.value?.getBoundingClientRect()
+
+  if (!rect) {
+    return { x: clientX, y: clientY }
+  }
+
+  return {
+    x: clientX - rect.left,
+    y: clientY - rect.top,
+  }
+}
+
+function getStaticPointerDistance(pointerA: StaticPointerPosition, pointerB: StaticPointerPosition) {
+  return Math.hypot(pointerA.x - pointerB.x, pointerA.y - pointerB.y)
+}
+
+function getStaticPointerMidpoint(pointerA: StaticPointerPosition, pointerB: StaticPointerPosition) {
+  return {
+    x: (pointerA.x + pointerB.x) / 2,
+    y: (pointerA.y + pointerB.y) / 2,
+  }
+}
+
+function setStaticZoomAt(clientX: number, clientY: number, zoom: number) {
+  const localPoint = getStaticLocalPoint(clientX, clientY)
+  const oldCanvasZoom = Math.max(0.001, staticDisplayCanvasZoom.value)
+  const nextStaticZoom = normalizeStaticZoom(zoom)
+  const nextCanvasZoom = Math.max(0.001, staticFitZoom.value * nextStaticZoom)
+  const contentX = (localPoint.x - staticPanX.value) / oldCanvasZoom
+  const contentY = (localPoint.y - staticPanY.value) / oldCanvasZoom
+
+  staticZoom.value = nextStaticZoom
+  staticPanX.value = localPoint.x - contentX * nextCanvasZoom
+  staticPanY.value = localPoint.y - contentY * nextCanvasZoom
+}
+
+function beginStaticPanGesture(pointerId: number, pointer: StaticPointerPosition) {
+  staticGesture = {
+    type: 'pan',
+    pointerId,
+    startX: pointer.x,
+    startY: pointer.y,
+    startPanX: staticPanX.value,
+    startPanY: staticPanY.value,
+  }
+  staticDragging.value = true
+}
+
+function beginStaticPinchGesture() {
+  const pointers = Array.from(staticPointers.values())
+
+  if (pointers.length < 2) {
+    return
+  }
+
+  const midpoint = getStaticPointerMidpoint(pointers[0], pointers[1])
+  staticGesture = {
+    type: 'pinch',
+    startDistance: Math.max(1, getStaticPointerDistance(pointers[0], pointers[1])),
+    startMidX: midpoint.x,
+    startMidY: midpoint.y,
+    startPanX: staticPanX.value,
+    startPanY: staticPanY.value,
+    startZoom: staticZoom.value,
+    startCanvasZoom: Math.max(0.001, staticDisplayCanvasZoom.value),
+  }
+  staticDragging.value = true
+}
+
+function handleStaticPointerDown(event: PointerEvent) {
+  if (event.button !== 0 && event.pointerType === 'mouse') {
+    return
+  }
+
+  event.preventDefault()
+  clearStaticZoomCommit()
+  const pointer = getStaticLocalPoint(event.clientX, event.clientY)
+  staticPointers.set(event.pointerId, pointer)
+  viewerShellRef.value?.setPointerCapture(event.pointerId)
+
+  if (staticPointers.size >= 2) {
+    beginStaticPinchGesture()
+    return
+  }
+
+  beginStaticPanGesture(event.pointerId, pointer)
+}
+
+function handleStaticPointerMove(event: PointerEvent) {
+  if (!staticPointers.has(event.pointerId)) {
+    return
+  }
+
+  event.preventDefault()
+  const pointer = getStaticLocalPoint(event.clientX, event.clientY)
+  staticPointers.set(event.pointerId, pointer)
+
+  if (staticGesture?.type === 'pinch') {
+    const pointers = Array.from(staticPointers.values())
+
+    if (pointers.length < 2) {
+      return
+    }
+
+    const distance = Math.max(1, getStaticPointerDistance(pointers[0], pointers[1]))
+    const midpoint = getStaticPointerMidpoint(pointers[0], pointers[1])
+    const nextStaticZoom = normalizeStaticZoom(staticGesture.startZoom * distance / staticGesture.startDistance)
+    const nextCanvasZoom = Math.max(0.001, staticFitZoom.value * nextStaticZoom)
+    const contentX = (staticGesture.startMidX - staticGesture.startPanX) / staticGesture.startCanvasZoom
+    const contentY = (staticGesture.startMidY - staticGesture.startPanY) / staticGesture.startCanvasZoom
+
+    staticZoom.value = nextStaticZoom
+    staticPanX.value = midpoint.x - contentX * nextCanvasZoom
+    staticPanY.value = midpoint.y - contentY * nextCanvasZoom
+    return
+  }
+
+  if (staticGesture?.type === 'pan' && staticGesture.pointerId === event.pointerId) {
+    staticPanX.value = staticGesture.startPanX + pointer.x - staticGesture.startX
+    staticPanY.value = staticGesture.startPanY + pointer.y - staticGesture.startY
+  }
+}
+
+function finishStaticPointer(event: PointerEvent) {
+  if (!staticPointers.has(event.pointerId)) {
+    return
+  }
+
+  viewerShellRef.value?.releasePointerCapture(event.pointerId)
+  staticPointers.delete(event.pointerId)
+
+  const remainingPointers = Array.from(staticPointers.entries())
+
+  if (remainingPointers.length >= 2) {
+    beginStaticPinchGesture()
+    return
+  }
+
+  if (remainingPointers.length === 1) {
+    beginStaticPanGesture(remainingPointers[0][0], remainingPointers[0][1])
+    return
+  }
+
+  resetStaticGesture()
+  scheduleStaticZoomCommit(0)
+}
+
+function handleStaticWheel(event: WheelEvent) {
+  event.preventDefault()
+  const deltaY = normalizeWheelDeltaY(event)
+
+  if (event.ctrlKey || event.metaKey) {
+    const zoomFactor = Math.exp(-deltaY * 0.0015)
+    setStaticZoomAt(event.clientX, event.clientY, staticZoom.value * zoomFactor)
+    scheduleStaticZoomCommit()
+    return
+  }
+
+  staticPanX.value -= event.deltaX
+  staticPanY.value -= deltaY
+}
+
+function handleViewerWheel(event: WheelEvent) {
+  if (chartRenderMode.value === 'static') {
+    handleStaticWheel(event)
+    return
+  }
+
+  handleChartWheel(event)
+}
+
+function handleViewerPointerDown(event: PointerEvent) {
+  if (chartRenderMode.value === 'static') {
+    handleStaticPointerDown(event)
+    return
+  }
+
+  handleChartPointerDown(event)
+}
+
+function handleViewerPointerMove(event: PointerEvent) {
+  if (chartRenderMode.value === 'static') {
+    handleStaticPointerMove(event)
+    return
+  }
+
+  handleChartPointerMove(event)
+}
+
+function finishViewerPointer(event: PointerEvent) {
+  if (chartRenderMode.value === 'static') {
+    finishStaticPointer(event)
+    return
+  }
+
+  finishChartPointer(event)
+}
+
+function updateDynamicChartEnabled(enabled: boolean) {
+  if (enabled === dynamicChartEnabled.value) {
+    return
+  }
+
+  if (!enabled) {
+    stopPlayback()
+    chartRenderMode.value = 'static'
+    resetStaticViewport()
+    return
+  }
+
+  clearStaticZoomCommit()
+  resetStaticGesture()
+  chartRenderMode.value = 'realtime'
 }
 
 function setViewerProgress(progress: number) {
@@ -635,6 +1076,7 @@ function handleChartPointerDown(event: PointerEvent) {
   }
 
   event.preventDefault()
+  dynamicDragging.value = true
   activeChartPointerId = event.pointerId
   chartDragStartY = event.clientY
   chartDragStartProgress = playbackProgress.value
@@ -657,6 +1099,7 @@ function finishChartPointer(event: PointerEvent) {
 
   viewerShellRef.value?.releasePointerCapture(event.pointerId)
   activeChartPointerId = null
+  dynamicDragging.value = false
 }
 
 function setProgressFromClientX(clientX: number) {
@@ -762,6 +1205,10 @@ function runPlayback(timestamp: number) {
 }
 
 function togglePlayback() {
+  if (playbackDisabled.value) {
+    return
+  }
+
   if (playing.value) {
     stopPlayback()
     return
@@ -828,6 +1275,38 @@ function stopRafDebugMonitor() {
 }
 
 watch(
+  viewerShellRef,
+  (element, _previousElement, onCleanup) => {
+    viewerResizeObserver?.disconnect()
+    viewerResizeObserver = null
+
+    if (!element) {
+      updateViewerShellSize()
+      return
+    }
+
+    updateViewerShellSize()
+
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const observer = new ResizeObserver(updateViewerShellSize)
+    observer.observe(element)
+    viewerResizeObserver = observer
+
+    onCleanup(() => {
+      observer.disconnect()
+
+      if (viewerResizeObserver === observer) {
+        viewerResizeObserver = null
+      }
+    })
+  },
+  { immediate: true },
+)
+
+watch(
   () => [
     route.params.musicId,
     route.query.instrument,
@@ -835,6 +1314,7 @@ watch(
     route.query.version,
     route.query.speed,
     route.query.scale,
+    route.query.barsPerColumn,
     route.query.chartMode,
     route.query.reverse,
   ],
@@ -867,6 +1347,10 @@ watch(
 onBeforeUnmount(() => {
   stopPlayback()
   stopRafDebugMonitor()
+  clearStaticZoomCommit()
+  resetStaticGesture()
+  viewerResizeObserver?.disconnect()
+  viewerResizeObserver = null
 })
 </script>
 
@@ -903,15 +1387,32 @@ onBeforeUnmount(() => {
         v-else-if="preview"
         ref="viewerShellRef"
         class="chart-preview__viewer-shell"
-        :class="{ 'chart-preview__viewer-shell--dragging': activeChartPointerId !== null }"
+        :class="{
+          'chart-preview__viewer-shell--dragging': chartDragging,
+          'chart-preview__viewer-shell--static': chartRenderMode === 'static',
+        }"
         aria-label="谱面画布"
-        @pointercancel="finishChartPointer"
-        @pointerdown="handleChartPointerDown"
-        @pointermove="handleChartPointerMove"
-        @pointerup="finishChartPointer"
-        @wheel="handleChartWheel"
+        @pointercancel="finishViewerPointer"
+        @pointerdown="handleViewerPointerDown"
+        @pointermove="handleViewerPointerMove"
+        @pointerup="finishViewerPointer"
+        @wheel="handleViewerWheel"
       >
+        <div
+          v-if="chartRenderMode === 'static'"
+          class="chart-preview__static-stage"
+        >
+          <div class="chart-preview__static-stack" :style="staticStackStyle">
+            <DtxChartCanvas
+              v-for="(canvasData, canvasIndex) in preview.canvasData"
+              :key="`${preview.chart.url}-${canvasIndex}`"
+              :canvas-data="canvasData"
+              :zoom="staticCanvasZoom"
+            />
+          </div>
+        </div>
         <DtxRealtimeCanvas
+          v-else
           :drawing-config="preview.drawingConfig"
           :dtx-json="preview.dtxJson"
           :progress="playbackProgress"
@@ -1009,6 +1510,40 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="chart-preview__panel-section">
+            <span>每列小节</span>
+            <div
+              class="chart-preview__speed-stepper"
+              :class="{ 'chart-preview__speed-stepper--disabled': !canAdjustBarsPerColumn }"
+            >
+              <button
+                class="chart-preview__speed-button"
+                type="button"
+                :disabled="!canDecreaseBarsPerColumn"
+                aria-label="减少每列小节"
+                @click="adjustBarsPerColumn(-BARS_PER_COLUMN_STEP)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M15 5L8 12L15 19"></path>
+                </svg>
+              </button>
+              <div class="chart-preview__speed-value" aria-live="polite">
+                {{ selectedBarsPerColumn }}
+              </div>
+              <button
+                class="chart-preview__speed-button"
+                type="button"
+                :disabled="!canIncreaseBarsPerColumn"
+                aria-label="增加每列小节"
+                @click="adjustBarsPerColumn(BARS_PER_COLUMN_STEP)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 5L16 12L9 19"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="chart-preview__panel-section">
             <span>反转</span>
             <button
               class="chart-preview__reverse-toggle"
@@ -1025,18 +1560,35 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="chart-preview__panel-section">
-          <span>模式</span>
-          <div class="chart-preview__panel-grid chart-preview__panel-grid--two">
+        <div class="chart-preview__panel-row chart-preview__panel-row--mode-dynamic">
+          <div class="chart-preview__panel-section chart-preview__panel-section--mode">
+            <span>模式</span>
+            <div class="chart-preview__panel-grid chart-preview__panel-grid--two">
+              <button
+                v-for="chartMode in CHART_MODE_OPTIONS"
+                :key="chartMode.key"
+                class="chart-preview__panel-button"
+                :class="getChartModeButtonClass(chartMode.key)"
+                type="button"
+                @click="updateChartMode(chartMode.key)"
+              >
+                {{ chartMode.label }}
+              </button>
+            </div>
+          </div>
+
+          <div class="chart-preview__panel-section">
+            <span>动态谱面</span>
             <button
-              v-for="chartMode in CHART_MODE_OPTIONS"
-              :key="chartMode.key"
-              class="chart-preview__panel-button"
-              :class="getChartModeButtonClass(chartMode.key)"
+              class="chart-preview__reverse-toggle"
               type="button"
-              @click="updateChartMode(chartMode.key)"
+              role="switch"
+              :aria-checked="dynamicChartEnabled"
+              @click="updateDynamicChartEnabled(!dynamicChartEnabled)"
             >
-              {{ chartMode.label }}
+              <span class="chart-preview__reverse-toggle-track">
+                <span class="chart-preview__reverse-toggle-thumb"></span>
+              </span>
             </button>
           </div>
         </div>
@@ -1072,6 +1624,7 @@ onBeforeUnmount(() => {
         <button
           class="chart-preview__play-button"
           type="button"
+          :disabled="playbackDisabled"
           :aria-label="playing ? '暂停自动滚动' : '播放自动滚动'"
           @click="togglePlayback"
         >
@@ -1196,6 +1749,30 @@ onBeforeUnmount(() => {
 
 .chart-preview__viewer-shell--dragging {
   cursor: grabbing;
+}
+
+.chart-preview__viewer-shell--static {
+  cursor: grab;
+}
+
+.chart-preview__static-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #000000;
+}
+
+.chart-preview__static-stack {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 0;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .chart-preview__raf-debug {
@@ -1367,6 +1944,15 @@ onBeforeUnmount(() => {
   object-fit: contain;
 }
 
+.chart-preview__play-button:disabled {
+  cursor: default;
+  opacity: 0.36;
+}
+
+.chart-preview__play-button:disabled img {
+  filter: grayscale(1);
+}
+
 .chart-preview__menu-button img {
   width: 30px;
   height: 30px;
@@ -1456,8 +2042,23 @@ onBeforeUnmount(() => {
 }
 
 .chart-preview__panel-row--speed-reverse {
-  grid-template-columns: minmax(0, 1fr) 88px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 70px;
+  gap: 8px;
   align-items: end;
+}
+
+.chart-preview__panel-row--mode-dynamic {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 70px;
+  gap: 8px;
+  align-items: end;
+}
+
+.chart-preview__panel-section--mode {
+  grid-column: span 2;
+}
+
+.chart-preview__panel-section--mode .chart-preview__panel-grid--two {
+  gap: 8px;
 }
 
 .chart-preview__panel-section > span {
@@ -1526,13 +2127,24 @@ onBeforeUnmount(() => {
 
 .chart-preview__speed-stepper {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
   align-items: stretch;
   min-height: 44px;
   overflow: hidden;
   border: 1px solid rgba(75, 59, 118, 0.24);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.58);
+}
+
+.chart-preview__speed-stepper--disabled {
+  border-color: rgba(120, 111, 139, 0.12);
+  background: rgba(217, 211, 224, 0.44);
+  color: #9a93a9;
+}
+
+.chart-preview__speed-stepper--disabled .chart-preview__speed-value,
+.chart-preview__speed-stepper--disabled .chart-preview__speed-button {
+  color: #9a93a9;
 }
 
 .chart-preview__speed-button {

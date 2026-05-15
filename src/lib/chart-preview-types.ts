@@ -95,6 +95,7 @@ export interface DtxDrawingConfig {
   difficultyLabel: DtxDifficultyLabel
   scale: number
   maxHeight: number
+  barsPerColumn?: number
   chartMode: DtxChartMode
   gameMode: DtxGameMode
   reverse: boolean

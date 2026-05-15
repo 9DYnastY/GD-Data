@@ -231,11 +231,19 @@ export class DtxCanvasPositioner {
     this.actualPixelsPerSecond = drawingOptions.scale * this.basePixelsPerSecond
     this.isDrawFromDownToUp = drawingOptions.gameMode === 'Drum' || drawingOptions.reverse
 
-    const mapping = this.computeContinuousBarIndexToFrameSheetMapping(
-      dtxJson,
-      drawingOptions.gameMode,
-      drawingOptions.chartMode,
-    )
+    const barsPerColumn = Math.floor(drawingOptions.barsPerColumn ?? 0)
+    const mapping = barsPerColumn > 0
+      ? this.computeFixedBarColumnMapping(
+        dtxJson,
+        barsPerColumn,
+        drawingOptions.gameMode,
+        drawingOptions.chartMode,
+      )
+      : this.computeContinuousBarIndexToFrameSheetMapping(
+        dtxJson,
+        drawingOptions.gameMode,
+        drawingOptions.chartMode,
+      )
 
     this.barIndexToFrameSheetMapping = mapping.barFrameSheetMapping
     this.bodySectionHeightPerCanvas = mapping.bodySectionHeightPerCanvas
@@ -256,7 +264,9 @@ export class DtxCanvasPositioner {
 
     this.placeFrameRects(mapping.partialFrameRect)
     this.computeChipPositionInCanvas(dtxJson, drawingOptions.gameMode, drawingOptions.chartMode)
-    this.splitContinuousCanvasIfNeeded(drawingOptions.maxHeight)
+    if (barsPerColumn <= 0) {
+      this.splitContinuousCanvasIfNeeded(drawingOptions.maxHeight)
+    }
   }
 
   public getCanvasDataForDrawing() {
@@ -441,7 +451,12 @@ export class DtxCanvasPositioner {
         return
       }
 
-      frameRect.rectPos.posY = this.bodyFrameMargins.top
+      frameRect.rectPos.posY = this.isDrawFromDownToUp
+        ? Math.max(
+          this.bodyFrameMargins.top,
+          canvasData.canvasSize.height - this.bodyFrameMargins.bottom - frameRect.rectPos.height,
+        )
+        : this.bodyFrameMargins.top
       canvasData.frameRect.push({ ...frameRect.rectPos })
     })
   }
@@ -738,6 +753,64 @@ export class DtxCanvasPositioner {
       numOfCanvas: 1,
       bodySectionHeightPerCanvas: [bodyHeight],
       widthPerCanvas: [this.canvasWidthForFrames(1, gameMode, chartMode)],
+      partialFrameRect: returnedFrameRect,
+    }
+  }
+
+  private computeFixedBarColumnMapping(
+    dtxJson: DtxJson,
+    barsPerColumn: number,
+    gameMode: DtxGameMode,
+    chartMode: DtxChartMode,
+  ) {
+    const barFrameSheetMapping: DtxInterimBarPos[] = []
+    const bodyHeightByColumn: number[] = []
+    const widthPerCanvas: number[] = []
+    const returnedFrameRect: DtxFrameRect[] = []
+    const safeBarsPerColumn = Math.max(1, barsPerColumn)
+    const columnCount = Math.max(1, Math.ceil(dtxJson.bars.length / safeBarsPerColumn))
+
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+      const firstBarIndex = columnIndex * safeBarsPerColumn
+      const lastBarIndex = Math.min(dtxJson.bars.length, firstBarIndex + safeBarsPerColumn)
+      let currentFramePosY = 0
+
+      for (let barIndex = firstBarIndex; barIndex < lastBarIndex; barIndex += 1) {
+        const barInfo = dtxJson.bars[barIndex]
+
+        barFrameSheetMapping[barIndex] = {
+          absoluteTime: barInfo.startTimePos,
+          relativePosY: currentFramePosY,
+          frameIndex: 0,
+          canvasSheetIndex: columnIndex,
+        }
+        currentFramePosY += barInfo.duration * this.actualPixelsPerSecond
+      }
+
+      bodyHeightByColumn[columnIndex] = Math.max(1, currentFramePosY)
+      widthPerCanvas[columnIndex] = this.canvasWidthForFrames(1, gameMode, chartMode)
+    }
+
+    const greatestBodyHeight = Math.max(1, ...bodyHeightByColumn)
+    const bodySectionHeightPerCanvas = bodyHeightByColumn.map(() => greatestBodyHeight)
+
+    bodyHeightByColumn.forEach((bodyHeight, columnIndex) => {
+      returnedFrameRect.push({
+        rectPos: {
+          posX: this.bodyFrameMargins.left + getFrameRectRelativePosX(),
+          posY: 0,
+          width: getFrameRectWidth(gameMode, chartMode),
+          height: bodyHeight,
+        },
+        canvasSheetIndex: columnIndex,
+      })
+    })
+
+    return {
+      barFrameSheetMapping,
+      numOfCanvas: columnCount,
+      bodySectionHeightPerCanvas,
+      widthPerCanvas,
       partialFrameRect: returnedFrameRect,
     }
   }

@@ -1,6 +1,7 @@
 import type { InstrumentKey, LevelKey } from '../types/song'
 import { resolveDtxChart } from './chart-preview-manifest'
 import { DtxFileParser } from './chart-preview-parser'
+import { DtxCanvasPositioner } from './chart-preview-positioner'
 import type { DtxChartMode, DtxDifficultyLabel, DtxDrawingConfig, DtxGameMode, LoadedDtxChartPreview } from './chart-preview-types'
 
 const GAME_MODE_BY_INSTRUMENT: Record<InstrumentKey, DtxGameMode> = {
@@ -45,6 +46,7 @@ export async function loadDtxChartPreview(
   speed = 1,
   chartMode: DtxChartMode = 'XG/Gitadora',
   reverse = false,
+  barsPerColumn = 5,
 ): Promise<LoadedDtxChartPreview> {
   const chart = await resolveDtxChart(musicId, instrument, level)
 
@@ -69,17 +71,19 @@ export async function loadDtxChartPreview(
     difficultyLabel: getDtxDifficultyLabel(level),
     scale: speed,
     maxHeight: 2000,
+    barsPerColumn,
     chartMode,
     gameMode: getDtxGameMode(instrument),
     reverse: instrument === 'drum' ? true : reverse,
     isLevelShown: true,
   }
   const dtxJson = parser.getDtxJson()
+  const canvasData = new DtxCanvasPositioner(dtxJson, drawingConfig).getCanvasDataForDrawing()
 
   return {
     chart,
     dtxJson,
     drawingConfig,
-    canvasData: [],
+    canvasData,
   }
 }
