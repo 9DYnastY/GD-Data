@@ -16,11 +16,10 @@
 ##  功能特性
 
 -  **曲库浏览** - 支持全版本曲库搜索、筛选和排序
+-  **谱面预览** - DTX 文件解析，支持静态预览和实时滚动播放
+-  **RemyWiki** - 一键跳转Remywiki查看歌曲详细信息
 -  **成绩查看** - 通过 BJMANIA 查看最佳成绩和最近游玩记录
 -  **B50 展示** - 生成并导出 B50 成绩海报
--  **谱面预览** - DTX 文件解析，支持静态预览和实时滚动播放
--  **收藏系统** - 本地收藏喜欢的歌曲，快速访问
--  **RemyWiki** - 一键跳转Remywiki查看歌曲详细信息
 
 ##  技术栈
 
@@ -82,6 +81,11 @@ npx cap open android
 - [MaimaiData](https://github.com/PaperPig/MaimaiData) - 本项目灵感来源与部分设计参考来源
 - [DTXViewerTool](https://github.com/fisyher/dtxviewertool) - 谱面预览功能代码参考
 - [DTXmaniaNX](https://github.com/limyz/DTXmaniaNX) - 部分美术资源参考
+- 感谢所有提供反馈和建议的玩家
+
+## 联系
+
+Q：1578717752
 
 ## 许可证
 

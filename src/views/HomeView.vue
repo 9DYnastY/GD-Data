@@ -55,6 +55,8 @@ const FULL_DIFFICULTY_MIN = 0
 const FULL_DIFFICULTY_MAX = 99
 const DIFFICULTY_STOPS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99]
 const INSTRUMENT_ORDER: InstrumentKey[] = ['drum', 'guitar', 'bass']
+const GF_DELTA_VERSION_ORDER = 30
+const DM_DELTA_VERSION_ORDER = 29
 const INSTRUMENT_LABELS: Record<InstrumentKey, string> = {
   drum: 'Drum',
   guitar: 'Guitar',
@@ -261,8 +263,15 @@ function resolveInstrumentVersionOrder(versionKey: string, instrument: Instrumen
   return instrument === 'drum' ? dmIndex : gfIndex
 }
 
-function isHiddenInstrumentVersion(versionKey: string, instrument: InstrumentKey) {
-  return resolveInstrumentVersionLabel(versionKey, instrument) === 'GALAXY WAVE DELTA'
+function isDeltaVersionOrder(versionOrder: number, instrument: InstrumentKey) {
+  return instrument === 'drum'
+    ? versionOrder === DM_DELTA_VERSION_ORDER
+    : versionOrder === GF_DELTA_VERSION_ORDER
+}
+
+function shouldHideIncompleteDeltaSong(song: SongViewModel, instrument: InstrumentKey) {
+  const versionOrder = resolveInstrumentVersionOrder(song.versionKey, instrument)
+  return isDeltaVersionOrder(versionOrder, instrument) && !song.links.remyUrl
 }
 
 function compareText(left: string, right: string) {
@@ -309,14 +318,14 @@ function matchesSelectedDifficultyRange(song: SongViewModel) {
 const selectedInstrumentLabel = computed(() => INSTRUMENT_LABELS[selectedInstrument.value])
 const selectedInstrumentToggleSrc = computed(() => INSTRUMENT_TOGGLE_ASSETS[selectedInstrument.value])
 
+const displayableSongs = computed(() => {
+  return songs.value.filter((song) => !shouldHideIncompleteDeltaSong(song, selectedInstrument.value))
+})
+
 const versionOptions = computed(() => {
   const uniqueVersions = new Map<number, { value: number; label: string; order: number }>()
 
-  songs.value.forEach((song) => {
-    if (isHiddenInstrumentVersion(song.versionKey, selectedInstrument.value)) {
-      return
-    }
-
+  displayableSongs.value.forEach((song) => {
     const order = resolveInstrumentVersionOrder(song.versionKey, selectedInstrument.value)
 
     if (uniqueVersions.has(order)) {
@@ -368,11 +377,7 @@ watch(
 const filteredSongs = computed(() => {
   const normalizedQuery = searchQuery.value.trim().toLowerCase()
 
-  const nextSongs = songs.value.filter((song) => {
-    if (isHiddenInstrumentVersion(song.versionKey, selectedInstrument.value)) {
-      return false
-    }
-
+  const nextSongs = displayableSongs.value.filter((song) => {
     const matchesSearch =
       normalizedQuery.length === 0 ||
       song.searchText.includes(normalizedQuery) ||

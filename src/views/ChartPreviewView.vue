@@ -776,8 +776,8 @@ function resetStaticGesture() {
 function resetStaticViewport() {
   clearStaticZoomCommit()
   resetStaticGesture()
-  staticZoom.value = 1
-  staticRenderedZoom.value = 1
+  staticZoom.value = STATIC_ZOOM_MIN
+  staticRenderedZoom.value = STATIC_ZOOM_MIN
   staticPanX.value = 0
   staticPanY.value = 0
 }

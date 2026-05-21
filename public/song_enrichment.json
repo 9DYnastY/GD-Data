@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": "20260511",
-  "publishedAt": "2026-05-10T08:33:23Z",
+  "catalogVersion": "embedded-2026-05-07",
+  "publishedAt": "2026-05-07T00:00:00+08:00",
   "records": {
     "0": {
       "remy_title": "I think about you",
@@ -4507,6 +4507,9 @@
       "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/f42c3ec18298ee3a-TABIDACHI.png",
       "remy_length": "1:21",
       "remy_bpm": 160
+    },
+    "1461": {
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/ba95737d6760fffa-music_id_1461.png"
     },
     "1462": {
       "remy_title": "無言の街",
@@ -14400,7 +14403,8 @@
       "remy_artist": "BEMANI Sound Team \"PHQUASE\" feat.かなたん",
       "remy_url": "https://remywiki.com/Warai_banashi",
       "remy_length": "2:00",
-      "remy_bpm": 153
+      "remy_bpm": 153,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/c4fe0106fdf25f40-Warai_banashi.png"
     },
     "2910": {
       "remy_title": "攻撃的国民的音楽",
@@ -14487,7 +14491,8 @@
       "remy_artist": "RENO",
       "remy_url": "https://remywiki.com/Quantum_Game_feat._Sakurai_Yuki",
       "remy_length": "1:38",
-      "remy_bpm": 173
+      "remy_bpm": 173,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/3a817120e4988d9e-Quantum_Game_feat.png"
     },
     "2921": {
       "remy_title": "gn8",
@@ -14764,7 +14769,8 @@
       "remy_artist": "周防パトラ feat.BEMANI Sound Team \"あさき\"",
       "remy_url": "https://remywiki.com/Metal_love_method",
       "remy_length": "2:01",
-      "remy_bpm": 195
+      "remy_bpm": 195,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/89fede16315880bd-Metal_love_method.png"
     },
     "2956": {
       "remy_title": "Over Time Groove",
@@ -14781,6 +14787,12 @@
       "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/8eae714fae7e0227-Snow_Falcon.png",
       "remy_length": "1:50",
       "remy_bpm": 200
+    },
+    "2958": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "MODEL DD14",
+      "remy_artist": "MUTSUHIKO IZUMI"
     },
     "2959": {
       "remy_title": "閉塞的フレーション",
@@ -14925,6 +14937,14 @@
       "remy_length": "1:57",
       "remy_bpm": 171
     },
+    "2977": {
+      "remy_title": "ANEMONE -GITADORA EDITION-",
+      "remy_artist": "BEMANI Sound Team \"HuΣeR × Yvya\" feat.紫村 花澄",
+      "remy_url": "https://remywiki.com/ANEMONE",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/42ff5d2a07c4c184-ANEMONE_-GITADORA_EDITION-.png",
+      "remy_length": "1:57",
+      "remy_bpm": 174
+    },
     "2978": {
       "remy_title": "FAKE TIME",
       "remy_artist": "dj REMO-CON",
@@ -14945,7 +14965,7 @@
       "remy_title": "もうあおむけでいくしかない",
       "remy_artist": "Super Momo Tarosans",
       "remy_url": "https://remywiki.com/Mou_aomukede_iku_shikanai",
-      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/eb3c068a28154264-Kr_Mou_aomukede_iku_shikanai.png",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/1729e3c9d774b1ee-Kr_Mou_aomukede_iku_shikanai.png",
       "remy_length": "1:55",
       "remy_bpm": 170
     },
@@ -15004,18 +15024,28 @@
       "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/a3a4c55a872031e5-Rabbit_hole.png",
       "remy_length": "2:06 (beatmania IIDX), 2:43 (ポラリスコード)"
     },
+    "2989": {
+      "remy_title": "ドーナツホール 2024",
+      "remy_artist": "ハチ",
+      "remy_url": "https://remywiki.com/Donut_hole",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/9d0619cefd1df0da-2024.png",
+      "remy_length": "2:02",
+      "remy_bpm": 252
+    },
     "2991": {
       "remy_title": "GHOST",
       "remy_artist": "Hommarju",
       "remy_url": "https://remywiki.com/GHOST",
-      "remy_length": "1:58"
+      "remy_length": "1:58",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/862948e3537f15ed-GHOST.png"
     },
     "2992": {
       "remy_title": "完全感覚Dreamer",
       "remy_artist": "ONE OK ROCK",
       "remy_url": "https://remywiki.com/Kanzen_kankaku_Dreamer",
       "remy_length": "TBD",
-      "remy_bpm": 190
+      "remy_bpm": 190,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/5863ff1ea9de3b4b-Dreamer.png"
     },
     "2993": {
       "remy_title": "メタり！！（feat. Tom Morello）",
@@ -15069,7 +15099,8 @@
       "remy_artist": "Mrs. GREEN APPLE",
       "remy_url": "https://remywiki.com/Ao_to_natsu",
       "remy_length": "1:43",
-      "remy_bpm": 185
+      "remy_bpm": 185,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/865cf568e5206eea-Ao_to_natsu.png"
     },
     "3000": {
       "remy_title": "インフェルノ",
@@ -15163,14 +15194,17 @@
       "remy_title": "D光石火",
       "remy_artist": "Masahiro \"Godspeed\" Aoki (feat.TUB)",
       "remy_url": "https://remywiki.com/Dkou_sekka",
-      "remy_length": "1:58"
+      "remy_length": "1:58",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/933db7721a944184-D.png",
+      "remy_bpm": 140
     },
     "3012": {
       "remy_title": "CHECKER FLAG",
       "remy_artist": "佐原至恩 feat. Leo",
       "remy_url": "https://remywiki.com/CHECKER_FLAG",
       "remy_length": "1:29",
-      "remy_bpm": 194
+      "remy_bpm": 194,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/4b27026baf9d56e8-CHECKER_FLAG.png"
     },
     "3013": {
       "remy_title": "ギャ・ギャ・ギャ・ギャラクシー！",
@@ -15200,7 +15234,8 @@
       "remy_artist": "Minstrel",
       "remy_url": "https://remywiki.com/I,_the_Dreamer",
       "remy_length": "1:48",
-      "remy_bpm": 186
+      "remy_bpm": 186,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/91d6973f542a372f-I_the_Dreamer.png"
     },
     "3017": {
       "remy_title": "Peyotl",
@@ -15213,13 +15248,14 @@
       "remy_title": "Neoverse",
       "remy_artist": "Yusuke Hiraga",
       "remy_url": "https://remywiki.com/Neoverse",
-      "remy_length": "1:54"
+      "remy_length": "1:54",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/f1e8fae639aeff95-Neoverse.png"
     },
     "3020": {
       "remy_title": "place of the sky",
       "remy_artist": "CROSSED FINGERS",
       "remy_url": "https://remywiki.com/Place_of_the_sky",
-      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/7dfc163dfd401066-Pe_place_of_the_sky.png",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/eb6a9c1a65b6aa13-place_of_the_sky.png",
       "remy_length": "2:01",
       "remy_bpm": 115
     },
@@ -15228,28 +15264,38 @@
       "remy_artist": "SUSURU TV. × BEMANI Sound Team \"Yvya\"",
       "remy_url": "https://remywiki.com/Ramen_Messiah:_Type_A",
       "remy_length": "1:58",
-      "remy_bpm": 184
+      "remy_bpm": 184,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/988258f8530bbf5c-Ramen_Messiah_Type_A.png"
     },
     "3023": {
       "remy_title": "Ramen Messiah: Type B",
       "remy_artist": "SUSURU TV. × BEMANI Sound Team \"Yvya\"",
       "remy_url": "https://remywiki.com/Ramen_Messiah:_Type_B",
       "remy_length": "2:01",
-      "remy_bpm": 184
+      "remy_bpm": 184,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/10404506538e1e3b-Ramen_Messiah_Type_B.png"
     },
     "3024": {
       "remy_title": "Reason",
       "remy_artist": "NEXTRADE",
       "remy_url": "https://remywiki.com/Reason",
       "remy_length": "1:50",
-      "remy_bpm": 194
+      "remy_bpm": 194,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/f98d438798d57f1d-Reason.png"
     },
     "3025": {
       "remy_title": "in the dark",
       "remy_artist": "4sh",
       "remy_url": "https://remywiki.com/In_the_dark",
       "remy_length": "1:51",
-      "remy_bpm": 215
+      "remy_bpm": 215,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/028c3788b2f6b182-in_the_dark.png"
+    },
+    "3026": {
+      "remy_url": "",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/72a0683ec45f6508-SunsetPop.png",
+      "remy_title": "SunsetPop",
+      "remy_artist": "YUKI SATO"
     },
     "3027": {
       "remy_title": "人類の進歩と調和？",
@@ -15262,32 +15308,152 @@
       "remy_title": "ノンストップ☆イレーション",
       "remy_artist": "ボタントビート",
       "remy_url": "https://remywiki.com/Nonstop_elation",
-      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/0eff2c9356fbe71f-Ec_Nonstop_elation.png",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/19f94fc319c31378-Ec_Nonstop_elation.png",
       "remy_length": "2:00",
       "remy_bpm": 196
+    },
+    "3029": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "Pigeon Business",
+      "remy_artist": "SESERI RADIO"
     },
     "3031": {
       "remy_title": "Sugar Coaster Girl",
       "remy_artist": "Citrus and Ocean Colour",
       "remy_url": "https://remywiki.com/Sugar_Coaster_Girl",
-      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/631054b8029a59ec-Ec_Sugar_Coaster_Girl.png",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/89a9dab8ffd0cdb6-Sugar_Coaster_Girl.png",
       "remy_length": "2:03",
       "remy_bpm": 195
+    },
+    "3032": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "賜物"
+    },
+    "3034": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "不可逆のモルタ",
+      "remy_artist": "METO METOMATE"
     },
     "3036": {
       "remy_title": "Spiral Clouds",
       "remy_artist": "TIME CAPSULE Lab.",
       "remy_url": "https://remywiki.com/Spiral_Clouds",
-      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/8e514fdb40874565-Usa_Spiral_Clouds.png",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/0cbf0b3a20bd4ea0-Spiral_Clouds.png",
       "remy_length": "1:57",
       "remy_bpm": 155
+    },
+    "3043": {
+      "remy_title": " ふうせんはいかが",
+      "remy_artist": "dj TAKA feat.Noria & 星野奏子",
+      "remy_url": "https://remywiki.com/Fuusen_wa_ikaga",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/e5344fabddbd4cae-Fuusen_wa_ikaga.png",
+      "remy_length": "2:00",
+      "remy_bpm": 333
+    },
+    "3044": {
+      "remy_title": "RUINA (GITADORA EDITION)",
+      "remy_artist": "MAX MAXIMIZER VS Dustup",
+      "remy_url": "https://remywiki.com/RUINA_(GITADORA_EDITION)",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/46b57fa94cc5230b-RUINA_GITADORA_EDITION.png",
+      "remy_length": "1:40",
+      "remy_bpm": 320
     },
     "3045": {
       "remy_title": "心海魚",
       "remy_artist": "KE!JU feat. ねんね",
       "remy_url": "https://remywiki.com/Shinkaigyo",
       "remy_length": "1:59",
-      "remy_bpm": 200
+      "remy_bpm": 200,
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/ad3dbbc6a0dbf0d5-Shinkaigyo.png"
+    },
+    "3047": {
+      "remy_title": "ムーブ・ユア・バディバディ",
+      "remy_artist": "RoughSkreamZ feat. Aikapin",
+      "remy_url": "https://remywiki.com/Move_your_body_body",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/c8512959f4385451-Move_your_body_body.png",
+      "remy_length": "1:56",
+      "remy_bpm": 160
+    },
+    "3048": {
+      "remy_url": "",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/7469d615ee4106cc-12091442_6937b6d123346.jpg",
+      "remy_title": "華麗なる！音戯探偵ひなビタ♫",
+      "remy_artist": "OTOGITANTEI HIN"
+    },
+    "3049": {
+      "remy_title": "レシピのリドル",
+      "remy_artist": "音戯探偵ひなビタ♫",
+      "remy_url": "https://remywiki.com/Recipe_no_riddle",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/a6ddc722d5367402-Recipe_no_riddle.png",
+      "remy_length": "2:13",
+      "remy_bpm": 245
+    },
+    "3051": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "TRIΔXIS",
+      "remy_artist": "YVYA"
+    },
+    "3054": {
+      "remy_title": "ZIGZAG COWBOY (GITADORA EDITION)",
+      "remy_artist": "劇団レコード",
+      "remy_url": "https://remywiki.com/ZIGZAG_COWBOY_(GITADORA_EDITION)",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/1ea87005c49850b8-ZIGZAG_COWBOY_GITADORA_EDITION.png",
+      "remy_length": "1:48",
+      "remy_bpm": 128
+    },
+    "3055": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "Emberflux"
+    },
+    "3057": {
+      "remy_title": "Shades of Day",
+      "remy_artist": "BEMANI Sound Team \"PON\"",
+      "remy_url": "https://remywiki.com/Shades_of_Day",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/2871323a67759352-Shades_of_Day.png",
+      "remy_length": "1:58",
+      "remy_bpm": 190
+    },
+    "3058": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "flowering",
+      "remy_artist": "OUSHOJINAOTO FE"
+    },
+    "3059": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "Xalith",
+      "remy_artist": "QUIMAR"
+    },
+    "3060": {
+      "remy_title": " 霽れと褻と穢れ",
+      "remy_artist": "BEMANI Sound Team \"PHQUASE\" feat.かなたん",
+      "remy_url": "https://remywiki.com/Hare_to_ke_to_kegare",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/3b2f9867d7875d54-Hare_to_ke_to_kegare.png",
+      "remy_length": "2:01",
+      "remy_bpm": 136
+    },
+    "3061": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "Symphony of Us",
+      "remy_artist": "MASAYUKI ISHII"
+    },
+    "3062": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "Journey of hope",
+      "remy_artist": "YUSUKE KOSHIRO"
+    },
+    "3063": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "(cheers cheers 合作)"
     },
     "3064": {
       "remy_title": "Lachryma《Re:Queen’M》 (GITADORA Edition)",
@@ -15328,6 +15494,55 @@
       "remy_length": "2:00",
       "remy_bpm": 208
     },
+    "3069": {
+      "remy_title": " 天上天下唯我独尊",
+      "remy_artist": "MINA",
+      "remy_url": "https://remywiki.com/Tenjou_tenge_yuiga_dokuson",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/1b264dbc8b659abf-Tenjou_tenge_yuiga_dokuson.png",
+      "remy_length": "1:32",
+      "remy_bpm": 145
+    },
+    "3070": {
+      "remy_title": "ヴァンパイア",
+      "remy_artist": "DECO*27 feat.初音ミク",
+      "remy_url": "https://remywiki.com/Vampire",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/726738a7f20a3c03-400px-Vampire.png",
+      "remy_length": "1:35",
+      "remy_bpm": 164
+    },
+    "3071": {
+      "remy_title": "ヒバナ (Reloaded)",
+      "remy_artist": "DECO*27",
+      "remy_url": "https://remywiki.com/Hibana_(Reloaded)",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/b95a755baab1449c-Reloaded.png",
+      "remy_length": "1:58",
+      "remy_bpm": 100
+    },
+    "3076": {
+      "remy_title": "MASTA BLASTA",
+      "remy_artist": "Hommarju",
+      "remy_url": "https://remywiki.com/MASTA_BLASTA",
+      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/9bc060542da0afd7-MASTA_BLASTA.png",
+      "remy_length": "1:54",
+      "remy_bpm": 180
+    },
+    "3077": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "Tear the Void",
+      "remy_artist": "TAN1CHU"
+    },
+    "3080": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "BLOW AWAY",
+      "remy_artist": "OTOSEMIYU TSUCH"
+    },
+    "3082": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "Wild And Crazy"
+    },
     "3084": {
       "remy_title": "murmur twins (hotchpotch pop ver.)",
       "remy_artist": "covered by 音乃瀬奏(ReGLOSS)",
@@ -15367,6 +15582,18 @@
       "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/42982738a5c4d81d-Shooting_Star__ReGLOSS_.png",
       "remy_length": "2:00",
       "remy_bpm": 170
+    },
+    "3089": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "Nocturnal Blaze . 狼煙ノ夢",
+      "remy_artist": "RYU"
+    },
+    "3092": {
+      "remy_url": "",
+      "remy_imageUrl": "",
+      "remy_title": "ウズマキ",
+      "remy_artist": "YUI"
     },
     "5000": {
       "remy_title": "Across the nightmare (CLASSIC)",
@@ -16127,10 +16354,6 @@
       "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/571e11da6595235f-Confession__Takao_Nagatani_.png",
       "remy_length": "1:51",
       "remy_bpm": 165
-    },
-    "1461": {
-      "remy_imageUrl": "https://gitadora.selundine.top/covers/remy/ba95737d6760fffa-music_id_1461.png"
     }
-  },
-  "notes": []
+  }
 }
