@@ -517,7 +517,3 @@ export async function exportElementAsImage(
     uri: file.uri ?? null,
   }
 }
-
-export async function exportElementAsPng(node: HTMLElement, baseName: string) {
-  return exportElementAsImage(node, baseName, { format: 'png' })
-}

@@ -1,7 +1,5 @@
 export type LevelKey = 'basic' | 'advanced' | 'extreme' | 'master'
 export type InstrumentKey = 'guitar' | 'drum' | 'bass'
-export type ToggleFilterValue = 'all' | 'yes' | 'no'
-export type SortKey = 'default' | 'title' | 'artist' | 'version' | 'bpm' | 'difficulty'
 
 export interface RawSong {
   music_id: number
@@ -94,14 +92,4 @@ export interface SongViewModel {
     artistKanaOrder: number
     artistKanaCategory: number
   }
-}
-
-export interface SongFilters {
-  versionKey: string
-  guitarMin: string
-  guitarMax: string
-  drumMin: string
-  drumMax: string
-  bassMin: string
-  bassMax: string
 }

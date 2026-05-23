@@ -66,10 +66,6 @@ public final class BjmaniaCookieJar implements CookieJar {
         cookies.clear();
     }
 
-    public synchronized List<Cookie> snapshot() {
-        return new ArrayList<>(cookies.values());
-    }
-
     private String cookieKey(Cookie cookie) {
         return cookie.name() + "@" + cookie.domain() + cookie.path();
     }

@@ -213,23 +213,6 @@ async function drawChip(context: CanvasRenderingContext2D, chip: DtxChipPixelRec
   context.drawImage(image, chip.rectPos.posX, chip.rectPos.posY - image.naturalHeight / 2)
 }
 
-async function drawImageRect(context: CanvasRenderingContext2D, imageRect: DtxImageRectPos) {
-  const image = await loadChartImage(imageRect.name)
-
-  if (!image) {
-    drawRect(context, imageRect.rectPos, HOLD_COLOR_INFO[imageRect.name] ?? 'rgba(255,255,255,0.28)')
-    return
-  }
-
-  context.drawImage(
-    image,
-    imageRect.rectPos.posX,
-    imageRect.rectPos.posY,
-    imageRect.rectPos.width,
-    imageRect.rectPos.height,
-  )
-}
-
 function drawHoldRect(context: CanvasRenderingContext2D, imageRect: DtxImageRectPos) {
   drawProgrammaticHoldRect(context, imageRect.name, imageRect.rectPos)
 }
@@ -251,10 +234,6 @@ export async function renderDtxCanvas(canvas: HTMLCanvasElement, canvasData: Dtx
 
   for (const holdRect of canvasData.holdNoteRect) {
     drawHoldRect(context, holdRect)
-  }
-
-  for (const imageRect of canvasData.images) {
-    await drawImageRect(context, imageRect)
   }
 
   canvasData.textPositions.forEach((textPos) => {

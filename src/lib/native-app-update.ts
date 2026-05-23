@@ -2,7 +2,6 @@ import { Capacitor, registerPlugin } from '@capacitor/core'
 
 export type NativeAppUpdateStatus =
   | 'idle'
-  | 'downloading'
   | 'downloaded'
   | 'permission_required'
   | 'installing'
@@ -47,7 +46,6 @@ function parseNumber(value: unknown) {
 
 function normalizeStatus(value: unknown): NativeAppUpdateStatus {
   switch (value) {
-    case 'downloading':
     case 'downloaded':
     case 'permission_required':
     case 'installing':

@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import appLogoSrc from '../assets/app/app-logo-noback.svg'
 import {
+  FALLBACK_VERSION_NAME,
   checkForAppUpdate,
   getInstalledAppVersionLabel,
 } from '../lib/app-update'
@@ -11,7 +12,7 @@ import { setDebugModeEnabled, useDebugMode } from '../lib/debug-mode'
 
 const router = useRouter()
 const debugModeEnabled = useDebugMode()
-const appVersionLabel = ref('1.1.0')
+const appVersionLabel = ref(FALLBACK_VERSION_NAME)
 const cacheSizeBytes = ref(0)
 const loadingCacheSize = ref(true)
 const clearingCache = ref(false)
@@ -57,7 +58,7 @@ async function refreshAppVersion() {
   try {
     appVersionLabel.value = await getInstalledAppVersionLabel()
   } catch {
-    appVersionLabel.value = '1.1.0'
+    appVersionLabel.value = FALLBACK_VERSION_NAME
   }
 }
 

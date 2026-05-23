@@ -100,7 +100,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
                         sessionManager.setReferer(url);
                     }
                     Log.d(TAG, "onPageStarted url=" + url);
-                    updateStatusForCurrentPage(url);
                     verifyLoginStateSoon();
                 }
 
@@ -112,7 +111,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
                         sessionManager.setReferer(url);
                     }
                     Log.d(TAG, "onPageFinished url=" + url);
-                    updateStatusForCurrentPage(url);
                     verifyLoginStateSoon();
                 }
 
@@ -162,8 +160,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
             loadLoginPage();
             return;
         }
-
-        updateStatus("Checking saved BJMANIA session...");
 
         new Thread(
                 () -> {
@@ -218,8 +214,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
     }
 
     private void loadLoginPage() {
-        updateStatus("Preparing BJMANIA login...");
-
         if (sessionManager != null) {
             sessionManager.clearNativeSession();
         }
@@ -285,7 +279,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
 
         if (verifyInFlight) {
             if (exitOnFailure && remainingAttempts > 0) {
-                updateStatus("Confirming BJMANIA session...");
                 scheduleExitVerificationRetry(remainingAttempts - 1);
             } else if (!exitOnFailure) {
                 scheduleAutoVerify(AUTO_VERIFY_INTERVAL_MS);
@@ -304,7 +297,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
         verifyInFlight = true;
         activeProbeExitOnFailure = exitOnFailure;
         activeProbeRemainingAttempts = remainingAttempts;
-        updateStatus("Confirming BJMANIA session...");
 
         new Thread(
                 () -> {
@@ -341,7 +333,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
                         return;
                     }
 
-                    updateStatusForCurrentPage(currentUrl);
                     scheduleAutoVerify(AUTO_VERIFY_INTERVAL_MS);
                     return;
                 }
@@ -350,7 +341,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
                     if (activeProbeExitOnFailure) {
                         finishCancelled();
                     } else {
-                        updateStatusForCurrentPage(currentUrl);
                         scheduleAutoVerify(AUTO_VERIFY_INTERVAL_MS);
                     }
                     return;
@@ -383,7 +373,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
                     return;
                 }
 
-                updateStatusForCurrentPage(currentUrl);
                 scheduleAutoVerify(AUTO_VERIFY_INTERVAL_MS);
             }
         );
@@ -424,14 +413,6 @@ public class BjmaniaLoginActivity extends AppCompatActivity {
         data.putExtra(EXTRA_CANCELLED, true);
         setResult(Activity.RESULT_CANCELED, data);
         finish();
-    }
-
-    private void updateStatusForCurrentPage(@Nullable String url) {
-        // Login status overlay removed.
-    }
-
-    private void updateStatus(String message) {
-        // Login status overlay removed; keep call sites as no-ops.
     }
 
     @Override

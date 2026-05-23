@@ -3,9 +3,8 @@ import { rawSkillToText } from './bjmania/client'
 
 const FIGMA_CARD_WIDTH = 240.311
 
-export const B50_CARD_WIDTH = 208
-export const B50_CARD_HEIGHT = 288
-export const B50_POSTER_SCALE = B50_CARD_WIDTH / FIGMA_CARD_WIDTH
+const B50_CARD_WIDTH = 208
+const B50_POSTER_SCALE = B50_CARD_WIDTH / FIGMA_CARD_WIDTH
 export const B50_POSTER_WIDTH = Math.round(3186 * B50_POSTER_SCALE)
 export const B50_POSTER_HEIGHT = Math.round(2136 * B50_POSTER_SCALE)
 
@@ -19,7 +18,7 @@ export function getB50RowKey(row: BjmaniaScoreListItem) {
   ].join(':')
 }
 
-export function sortB50Rows(rows: BjmaniaScoreListItem[]) {
+function sortB50Rows(rows: BjmaniaScoreListItem[]) {
   return rows
     .slice()
     .sort((left, right) => right.skillCalcRaw - left.skillCalcRaw || left.musicId - right.musicId)

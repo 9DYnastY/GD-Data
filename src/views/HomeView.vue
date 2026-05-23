@@ -15,7 +15,7 @@ import {
   mapBestScoresToList,
 } from '../lib/bjmania/client'
 import { preloadCoverImages, preloadCoverImagesNow } from '../lib/cover-preload'
-import { useDebugMode } from '../lib/debug-mode'
+import { formatDebugValue, useDebugMode } from '../lib/debug-mode'
 import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
 import { favoriteMusicIds } from '../lib/song-favorites'
 import { useElementScale } from '../lib/use-element-scale'
@@ -501,22 +501,6 @@ const {
 function setSongListRef(element: unknown) {
   setSongListElement(element)
   setSongCardScaleElement(element)
-}
-
-function formatDebugValue(value: unknown) {
-  if (value === null || value === undefined || value === '') {
-    return '--'
-  }
-
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value)
-    } catch {
-      return String(value)
-    }
-  }
-
-  return String(value)
 }
 
 function songMdbDebugRows(song: SongViewModel) {

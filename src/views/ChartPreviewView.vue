@@ -35,7 +35,7 @@ interface LevelOption {
 }
 
 interface ChartModeOption {
-  key: Exclude<DtxChartMode, 'Full'>
+  key: DtxChartMode
   label: string
 }
 

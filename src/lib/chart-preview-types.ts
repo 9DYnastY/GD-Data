@@ -1,7 +1,7 @@
 import type { InstrumentKey, LevelKey } from '../types/song'
 
 export type DtxGameMode = 'Drum' | 'Guitar' | 'Bass'
-export type DtxChartMode = 'XG/Gitadora' | 'Classic' | 'Full'
+export type DtxChartMode = 'XG/Gitadora' | 'Classic'
 export type DtxDifficultyLabel = 'Basic' | 'Advanced' | 'Extreme' | 'Master' | 'Real'
 
 export interface DtxLine {
@@ -84,7 +84,6 @@ export interface DtxCanvasData {
   textPositions: DtxTextRectPos[]
   frameRect: DtxRect[]
   holdNoteRect: DtxImageRectPos[]
-  images: DtxImageRectPos[]
   canvasSize: {
     width: number
     height: number

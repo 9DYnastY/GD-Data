@@ -1,12 +1,10 @@
 ﻿<script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import B50ScoreCard from '../components/B50ScoreCard.vue'
 import SkillProfileBoard from '../components/SkillProfileBoard.vue'
 import SkillScoreCard from '../components/SkillScoreCard.vue'
 import dmModeToggleSrc from '../assets/skill-toggle/dm-mode.svg'
 import gfModeToggleSrc from '../assets/skill-toggle/gf-mode.svg'
-import { exportElementAsPng, preloadImageSource, resolveImageSourceForExport } from '../lib/b50-export'
 import {
   clearBjmaniaSkillSnapshotCache,
   loadBjmaniaSkillSnapshotCache,
@@ -23,7 +21,7 @@ import {
 } from '../lib/bjmania/client'
 import { BJMANIA_BASE_URL, clearBjmaniaCookies, isNativeBjmaniaHttp } from '../lib/bjmania/http'
 import { openBjmaniaNativeLogin } from '../lib/bjmania/native-auth'
-import { useDebugMode } from '../lib/debug-mode'
+import { formatDebugJson, formatDebugValue, useDebugMode } from '../lib/debug-mode'
 import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
 import { useElementScale } from '../lib/use-element-scale'
 import { useWindowVirtualList } from '../lib/use-window-virtual-list'
@@ -96,10 +94,6 @@ const showProfilePanel = ref(false)
 const openMenu = ref<SkillMenu>(null)
 const topShellRef = ref<HTMLElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
-const b50ExportShellRef = ref<HTMLElement | null>(null)
-const b50ExportRow = ref<BjmaniaScoreListItem | null>(null)
-const b50ExportCoverSrc = ref<string | null>(null)
-const generatingB50 = ref(false)
 const showAvatarGuide = ref(false)
 const showSignOutConfirm = ref(false)
 const showVersionPanel = ref(false)
@@ -210,34 +204,6 @@ const skillApiDebugSections = computed(() => {
 function setErrorMessage(target: typeof loginError | typeof dataError, error: unknown, fallback: string) {
   if (error instanceof Error && error.message) target.value = error.message
   else target.value = fallback
-}
-
-function formatDebugValue(value: unknown) {
-  if (value === null || value === undefined || value === '') {
-    return '--'
-  }
-
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value)
-    } catch {
-      return String(value)
-    }
-  }
-
-  return String(value)
-}
-
-function formatDebugJson(value: unknown) {
-  if (value === null || value === undefined) {
-    return '{}'
-  }
-
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return '{}'
-  }
 }
 
 function skillScoreDebugRows(row: BjmaniaScoreListItem) {
@@ -569,20 +535,6 @@ async function handleProfileBadgeClick() {
 }
 function cycleFamily() { selectedFamily.value = selectedFamily.value === 'dm' ? 'gf' : 'dm' }
 
-function pickTopB50Row() {
-  const skillRows = filterScoresByFamily(scoreRows.value, selectedFamily.value)
-    .filter((row) => row.inSkill && !row.isDeleted)
-    .sort((left, right) => right.skillCalcRaw - left.skillCalcRaw || left.musicId - right.musicId)
-
-  if (skillRows.length > 0) {
-    return skillRows[0]
-  }
-
-  return filterScoresByFamily(scoreRows.value, selectedFamily.value)
-    .filter((row) => !row.isDeleted)
-    .sort((left, right) => right.skillCalcRaw - left.skillCalcRaw || left.musicId - right.musicId)[0] ?? null
-}
-
 async function handleGenerateB50() {
   showProfilePanel.value = false
   await router.push({
@@ -592,63 +544,6 @@ async function handleGenerateB50() {
       version: selectedMdbVersion.value ?? undefined,
     },
   })
-  return
-
-  if (generatingB50.value) {
-    return
-  }
-
-  const topRow = pickTopB50Row()
-
-  if (!topRow) {
-    if (typeof window !== 'undefined') {
-      window.alert('当前模式下没有可生成的 B50 卡片。')
-    }
-    return
-  }
-
-  generatingB50.value = true
-  const resolvedCoverSrc = await resolveImageSourceForExport(
-    topRow.song?.heroImageUrl ?? null,
-    topRow.song?.heroImageCacheKey ?? `${selectedFamily.value}_${topRow.musicId}_${topRow.instrument}`,
-  )
-
-  const coverReady = await preloadImageSource(resolvedCoverSrc)
-  b50ExportCoverSrc.value = coverReady ? resolvedCoverSrc : null
-  b50ExportRow.value = topRow
-
-  try {
-    await nextTick()
-
-    if (!b50ExportShellRef.value) {
-      throw new Error('B50 export card did not render.')
-    }
-
-    const result = await exportElementAsPng(
-      b50ExportShellRef.value!,
-      `b50_${selectedFamily.value}_${topRow.musicId}_${topRow.instrument}`,
-    )
-
-    if (typeof window !== 'undefined') {
-      const message = result.uri
-        ? `B50 卡片已保存到本地：${result.filename}`
-        : `B50 卡片已下载：${result.filename}`
-      window.alert(message)
-    }
-  } catch (error: unknown) {
-    let message = 'B50 export failed.'
-
-    if (error instanceof Error) {
-      message = (error as Error).message || message
-    }
-
-
-    if (typeof window !== 'undefined') {
-      window.alert(message)
-    }
-  } finally {
-    generatingB50.value = false
-  }
 }
 
 async function handleOpenPlayHistory() {
@@ -983,15 +878,6 @@ onBeforeUnmount(() => {
       <img class="family-fab__image" :src="selectedFamilyToggleSrc" alt="" aria-hidden="true" />
     </button>
 
-    <div class="b50-export-stage" aria-hidden="true">
-      <div
-        v-if="b50ExportRow"
-        ref="b50ExportShellRef"
-        class="b50-export-stage__shell"
-      >
-        <B50ScoreCard :row="b50ExportRow" :cover-src-override="b50ExportCoverSrc" />
-      </div>
-    </div>
   </section>
 </template>
 
@@ -1767,22 +1653,6 @@ onBeforeUnmount(() => {
   display: block;
   width: 56px;
   height: 56px;
-}
-
-.b50-export-stage {
-  position: fixed;
-  top: 0;
-  left: -9999px;
-  z-index: -1;
-  width: 208px;
-  height: 288px;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.b50-export-stage__shell {
-  width: 208px;
-  height: 288px;
 }
 
 .panel-fade-enter-active,

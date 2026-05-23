@@ -5,7 +5,6 @@ import type {
   BjmaniaGameProfile,
   BjmaniaGitadoraProfile,
   BjmaniaGitadoraSnapshot,
-  BjmaniaLoginPayload,
   BjmaniaProfileSticker,
   BjmaniaProfilesResponse,
   BjmaniaRecentPlay,
@@ -225,23 +224,8 @@ async function callGrpcUnary(path: string, message: Uint8Array) {
   return decodeGrpcWebUnary(response.body)
 }
 
-export async function loginBjmania(payload: BjmaniaLoginPayload) {
-  const response = await bjmaniaJsonRequest<null>({
-    path: '/api/auth/login',
-    method: 'POST',
-    body: payload,
-  })
-
-  if (response.status !== 204) {
-    throw new Error(`Login failed with status ${response.status}`)
-  }
-}
-
 export async function getBjmaniaAuthMe() {
-  const response = await bjmaniaJsonRequest<BjmaniaAuthUser>({
-    path: '/api/auth/me',
-    method: 'GET',
-  })
+  const response = await bjmaniaJsonRequest<BjmaniaAuthUser>('/api/auth/me')
 
   if (response.status < 200 || response.status >= 300 || !response.data) {
     throw new Error(`Auth check failed with status ${response.status}`)

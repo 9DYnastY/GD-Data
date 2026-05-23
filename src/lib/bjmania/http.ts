@@ -17,30 +17,26 @@ export function isNativeBjmaniaHttp() {
   return Capacitor.getPlatform() !== 'web'
 }
 
-export async function bjmaniaJsonRequest<TResponse>(options: {
-  path: string
-  method?: 'GET' | 'POST'
-  body?: unknown
-}): Promise<{ status: number; data: TResponse | null }> {
-  const url = createUrl(options.path)
-  const method = options.method ?? 'GET'
+export async function bjmaniaJsonRequest<TResponse>(
+  path: string,
+): Promise<{ status: number; data: TResponse | null }> {
+  const url = createUrl(path)
 
   if (isNativeBjmaniaApi()) {
-    if (method === 'GET' && options.path === '/api/auth/me') {
+    if (path === '/api/auth/me') {
       return await nativeBjmaniaAuthMe<TResponse>()
     }
 
-    throw new Error(`Native BJMANIA JSON request is not implemented for ${method} ${options.path}`)
+    throw new Error(`Native BJMANIA JSON request is not implemented for ${path}`)
   }
 
   const response = await fetch(url, {
-    method,
+    method: 'GET',
     headers: {
       Accept: 'application/json, text/plain, */*',
       'Content-Type': 'application/json',
     },
     credentials: 'include',
-    body: method === 'GET' ? undefined : JSON.stringify(options.body ?? {}),
   })
 
   if (response.status === 204) {

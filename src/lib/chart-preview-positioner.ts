@@ -254,7 +254,6 @@ export class DtxCanvasPositioner {
         textPositions: [],
         frameRect: [],
         holdNoteRect: [],
-        images: [],
         canvasSize: {
           width: mapping.widthPerCanvas[index] ?? 0,
           height: this.canvasHeightGivenBodySectionHeight(mapping.bodySectionHeightPerCanvas[index] ?? 0),
@@ -279,7 +278,6 @@ export class DtxCanvasPositioner {
       textPositions: [],
       frameRect: [],
       holdNoteRect: [],
-      images: [],
       canvasSize: {
         width,
         height,
@@ -337,7 +335,7 @@ export class DtxCanvasPositioner {
     segments: DtxCanvasData[],
     imageRect: DtxImageRectPos,
     segmentHeight: number,
-    targetKey: 'holdNoteRect' | 'images',
+    targetKey: 'holdNoteRect',
   ) {
     this.getSegmentIndexesForRange(
       imageRect.rectPos.posY,
@@ -430,10 +428,6 @@ export class DtxCanvasPositioner {
 
     fullCanvas.holdNoteRect.forEach((holdRect) => {
       this.addClippedImageRectToSegments(segments, holdRect, segmentHeight, 'holdNoteRect')
-    })
-
-    fullCanvas.images.forEach((imageRect) => {
-      this.addClippedImageRectToSegments(segments, imageRect, segmentHeight, 'images')
     })
 
     fullCanvas.textPositions.forEach((textPos) => {

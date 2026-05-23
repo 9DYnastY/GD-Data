@@ -272,20 +272,10 @@ function resolveMdbVersion(manifest: MdbVersionManifest, requestedVersion?: numb
   return manifest.latest
 }
 
-export async function getLocalMdbVersions() {
-  const manifest = await loadMdbManifest()
-  return [...manifest.versions]
-}
-
 export async function resolveAvailableLocalMdbVersions(gameVersions: number[]) {
   const manifest = await loadMdbManifest()
   const ownedVersions = new Set(gameVersions.filter((version) => Number.isFinite(version)))
   return manifest.versions.filter((version) => ownedVersions.has(version))
-}
-
-export async function getDefaultLocalMdbVersion() {
-  const manifest = await loadMdbManifest()
-  return manifest.latest
 }
 
 function parseSongEnrichmentRecord(value: unknown): SongEnrichmentRecord | null {
@@ -885,10 +875,6 @@ export function onSongCatalogUpdated(
 
 export function loadSongCatalog(options?: { mdbVersion?: number | null }): Promise<SongViewModel[]> {
   return loadSongCatalogState(options).then((catalog) => catalog.songs)
-}
-
-export function loadSongCatalogForVersion(mdbVersion: number): Promise<SongViewModel[]> {
-  return loadSongCatalog({ mdbVersion })
 }
 
 export async function loadSongByMusicId(

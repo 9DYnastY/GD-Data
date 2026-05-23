@@ -5,7 +5,7 @@ import RecentPlayCard from '../components/RecentPlayCard.vue'
 import dmModeToggleSrc from '../assets/skill-toggle/dm-mode.svg'
 import gfModeToggleSrc from '../assets/skill-toggle/gf-mode.svg'
 import { loadBjmaniaSkillSnapshotCache, saveBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
-import { useDebugMode } from '../lib/debug-mode'
+import { formatDebugValue, useDebugMode } from '../lib/debug-mode'
 import {
   filterRecentByFamily,
   loadBjmaniaGitadoraSnapshot,
@@ -175,22 +175,6 @@ function cycleFamily() {
 
 function rowKey(row: BjmaniaRecentListItem, index: number) {
   return `${row.timestamp}-${row.musicId ?? 'unknown'}-${row.instrument ?? 'unknown'}-${row.level ?? 'unknown'}-${index}`
-}
-
-function formatDebugValue(value: unknown) {
-  if (value === null || value === undefined || value === '') {
-    return '--'
-  }
-
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value)
-    } catch {
-      return String(value)
-    }
-  }
-
-  return String(value)
 }
 
 function mappingDebugRows(row: BjmaniaRecentListItem) {

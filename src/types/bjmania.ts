@@ -11,18 +11,6 @@ export type BjmaniaScoreSortKey =
   | 'difficulty-asc'
   | 'difficulty-desc'
 
-export interface BjmaniaCaptchaToken {
-  ticket: string
-  randstr: string
-}
-
-export interface BjmaniaLoginPayload {
-  email: string
-  password: string
-  remember: boolean
-  captcha: BjmaniaCaptchaToken
-}
-
 export interface BjmaniaAuthUser {
   id: string
   name: string

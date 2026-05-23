@@ -371,10 +371,6 @@ export function preloadDtxChartManifest() {
   })
 }
 
-export function getLoadedDtxChartManifest() {
-  return activeManifest
-}
-
 export function hasLoadedDtxChartSet(musicId: number, manifest = activeManifest) {
   return Boolean(manifest?.charts[String(musicId)])
 }
