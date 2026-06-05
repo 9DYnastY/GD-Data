@@ -18,6 +18,7 @@ const props = defineProps<{
   instruments: InstrumentDifficulty[]
   compact?: boolean
   selectedInstrument?: InstrumentKey
+  highlightLevel?: LevelKey | null
 }>()
 
 const COMPACT_CELL_BACKGROUNDS: Record<InstrumentKey, Record<LevelKey, string>> = {
@@ -61,19 +62,6 @@ const compactLevels = computed(() => {
   return compactInstrument.value ? orderedLevels(compactInstrument.value.levels) : []
 })
 
-function levelClass(level: LevelKey) {
-  switch (level) {
-    case 'master':
-      return 'difficulty-cell--master'
-    case 'extreme':
-      return 'difficulty-cell--extreme'
-    case 'advanced':
-      return 'difficulty-cell--advanced'
-    default:
-      return 'difficulty-cell--basic'
-  }
-}
-
 function displayDifficultyText(level: DifficultySlot) {
   return level.available ? level.difficultyText : '-.--'
 }
@@ -90,7 +78,7 @@ function compactCellBackground(level: LevelKey) {
       v-for="level in compactLevels"
       :key="`${compactInstrument.key}-${level.level}`"
       class="compact-grid__cell"
-      :class="levelClass(level.level)"
+      :class="{ 'compact-grid__cell--highlighted': props.highlightLevel === level.level }"
       :style="{ backgroundImage: `url(${compactCellBackground(level.level)})` }"
     >
       <div class="compact-grid__value" :class="{ 'compact-grid__value--missing': !level.available }">
@@ -132,7 +120,7 @@ function compactCellBackground(level: LevelKey) {
           v-for="level in orderedLevels(instrument.levels)"
           :key="`${instrument.key}-${level.level}`"
           class="detail-grid__cell"
-          :class="levelClass(level.level)"
+          :class="{ 'detail-grid__cell--highlighted': props.highlightLevel === level.level }"
         >
           <p class="detail-grid__label">{{ level.label }}</p>
           <p class="detail-grid__value">{{ displayDifficultyText(level) }}</p>
@@ -161,12 +149,8 @@ function compactCellBackground(level: LevelKey) {
 }
 
 .compact-grid__value {
-  position: relative;
-  z-index: 1;
-}
-
-.compact-grid__value {
   position: absolute;
+  z-index: 1;
   left: 2px;
   right: 0;
   top: 11px;
@@ -186,6 +170,13 @@ function compactCellBackground(level: LevelKey) {
   left: 0;
   right: 0;
   justify-content: center;
+}
+
+.compact-grid__cell--highlighted {
+  z-index: 2;
+  box-shadow:
+    0 0 18px 7px rgba(255, 159, 46, 0.62),
+    0 0 42px 14px rgba(255, 159, 46, 0.3);
 }
 
 .compact-grid__cell--empty {
@@ -261,6 +252,14 @@ function compactCellBackground(level: LevelKey) {
   font-family: var(--font-display);
   font-size: 1rem;
   font-weight: 700;
+}
+
+.detail-grid__cell--highlighted {
+  position: relative;
+  z-index: 1;
+  box-shadow:
+    0 0 18px 7px rgba(255, 159, 46, 0.58),
+    0 0 40px 13px rgba(255, 159, 46, 0.28);
 }
 
 @media (max-width: 720px) {

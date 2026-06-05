@@ -5,7 +5,7 @@ import DifficultyGrid from './DifficultyGrid.vue'
 import LazyCoverImage from './LazyCoverImage.vue'
 import songCardChromeSrc from '../assets/song-page/Card_Song/song-card-chrome.png'
 import { resolveInstrumentVersionLogo } from '../lib/version-logos'
-import type { InstrumentKey, SongViewModel } from '../types/song'
+import type { InstrumentKey, LevelKey, SongViewModel } from '../types/song'
 
 const CARD_WIDTH = 375
 const CARD_HEIGHT = 199
@@ -18,6 +18,7 @@ const props = defineProps<{
   cardScale?: number
   animateCoverLoading?: boolean
   eagerCover?: boolean
+  highlightLevel?: LevelKey | null
 }>()
 
 const titleCanvas =
@@ -121,6 +122,7 @@ const versionLogoSrc = computed(() => resolveInstrumentVersionLogo(props.song.ve
             <div class="song-card__difficulty-area">
               <DifficultyGrid
                 :compact="true"
+                :highlight-level="highlightLevel"
                 :instruments="song.instruments"
                 :selected-instrument="selectedInstrument"
               />

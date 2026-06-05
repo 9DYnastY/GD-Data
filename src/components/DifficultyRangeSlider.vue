@@ -1,23 +1,51 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
-const DEFAULT_STOPS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99]
+const ITEM_WIDTH = 58
+const ITEM_GAP = 8
+const STEP_WIDTH = ITEM_WIDTH + ITEM_GAP
 
-const props = defineProps<{
-  minValue: number
-  maxValue: number
-  stops?: number[]
+const props = withDefaults(defineProps<{
+  startValue: number
+  minValue?: number
+  maxValue?: number
+  windowSize?: number
+  stepValue?: number
   label?: string
-}>()
+  disabled?: boolean
+}>(), {
+  minValue: 0,
+  maxValue: 1000,
+  windowSize: 50,
+  stepValue: 50,
+  disabled: false,
+})
 
 const emit = defineEmits<{
-  'update:minValue': [value: number]
-  'update:maxValue': [value: number]
+  'update:startValue': [value: number]
 }>()
 
+const dragging = ref(false)
+const dragOffset = ref(0)
+let dragStartX = 0
+
+const spanValue = computed(() => Math.max(props.maxValue - props.minValue, 1))
+const windowValue = computed(() => Math.min(Math.max(props.windowSize, 1), spanValue.value))
+const maxStartValue = computed(() => Math.max(props.minValue, props.maxValue - windowValue.value))
+
 const stopValues = computed(() => {
-  const candidateStops = props.stops ?? DEFAULT_STOPS
-  return candidateStops.length > 1 ? candidateStops : DEFAULT_STOPS
+  const stops: number[] = []
+  const stepValue = Math.max(props.stepValue, 1)
+
+  for (let value = props.minValue; value <= maxStartValue.value; value += stepValue) {
+    stops.push(value)
+  }
+
+  if (stops[stops.length - 1] !== maxStartValue.value) {
+    stops.push(maxStartValue.value)
+  }
+
+  return stops.length > 0 ? stops : [props.minValue]
 })
 
 function clampIndex(index: number) {
@@ -44,219 +72,260 @@ function valueAt(index: number) {
   return stopValues.value[clampIndex(index)]
 }
 
-function percentAt(index: number) {
-  if (stopValues.value.length === 1) {
-    return 0
+function formatDifficulty(value: number) {
+  return (value / 100).toFixed(1)
+}
+
+const startIndex = computed(() => findClosestIndex(props.startValue))
+const currentStartValue = computed(() => valueAt(startIndex.value))
+const currentEndValue = computed(() => currentStartValue.value + windowValue.value)
+const rangeText = computed(() => `${formatDifficulty(currentStartValue.value)} - ${formatDifficulty(currentEndValue.value)}`)
+const boundaryValues = computed(() => {
+  const boundaries = [...stopValues.value]
+
+  if (boundaries[boundaries.length - 1] !== props.maxValue) {
+    boundaries.push(props.maxValue)
   }
 
-  return (clampIndex(index) / (stopValues.value.length - 1)) * 100
+  return boundaries
+})
+const selectedCenterOffset = computed(() => startIndex.value * STEP_WIDTH + ITEM_WIDTH + ITEM_GAP / 2)
+
+const trackStyle = computed(() => ({
+  transform: `translate3d(${dragOffset.value - selectedCenterOffset.value}px, -50%, 0)`,
+}))
+
+function updateStartIndex(rawIndex: number) {
+  if (props.disabled) {
+    return
+  }
+
+  emit('update:startValue', valueAt(rawIndex))
 }
 
-function formatDifficulty(value: number) {
-  return value === 99 ? '9.9' : `${Math.floor(value / 10)}.0`
+function stepWindow(delta: number) {
+  updateStartIndex(startIndex.value + delta)
 }
 
-const minIndex = computed(() => findClosestIndex(props.minValue))
-const maxIndex = computed(() => findClosestIndex(props.maxValue))
-const leftPercent = computed(() => percentAt(minIndex.value))
-const rightPercent = computed(() => percentAt(maxIndex.value))
-const activeWidth = computed(() => Math.max(rightPercent.value - leftPercent.value, 0))
-const rangeText = computed(() => `${formatDifficulty(props.minValue)} - ${formatDifficulty(props.maxValue)}`)
+function handlePointerDown(event: PointerEvent) {
+  if (props.disabled) {
+    return
+  }
 
-function updateMinIndex(rawIndex: number) {
-  const nextIndex = Math.min(clampIndex(rawIndex), maxIndex.value)
-  emit('update:minValue', valueAt(nextIndex))
+  dragging.value = true
+  dragOffset.value = 0
+  dragStartX = event.clientX
+  event.currentTarget instanceof HTMLElement && event.currentTarget.setPointerCapture(event.pointerId)
 }
 
-function updateMaxIndex(rawIndex: number) {
-  const nextIndex = Math.max(clampIndex(rawIndex), minIndex.value)
-  emit('update:maxValue', valueAt(nextIndex))
+function handlePointerMove(event: PointerEvent) {
+  if (props.disabled || !dragging.value) {
+    return
+  }
+
+  dragOffset.value = event.clientX - dragStartX
+}
+
+function finishDrag(event: PointerEvent) {
+  if (!dragging.value) {
+    return
+  }
+
+  const deltaSteps = Math.round(-dragOffset.value / STEP_WIDTH)
+  dragging.value = false
+  dragOffset.value = 0
+  updateStartIndex(startIndex.value + deltaSteps)
+
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+}
+
+function handleKeydown(event: KeyboardEvent) {
+  if (props.disabled) {
+    return
+  }
+
+  switch (event.key) {
+    case 'ArrowLeft':
+      event.preventDefault()
+      stepWindow(-1)
+      break
+    case 'ArrowRight':
+      event.preventDefault()
+      stepWindow(1)
+      break
+    case 'Home':
+      event.preventDefault()
+      updateStartIndex(0)
+      break
+    case 'End':
+      event.preventDefault()
+      updateStartIndex(stopValues.value.length - 1)
+      break
+  }
 }
 </script>
 
 <template>
-  <div class="range-slider">
-    <div class="range-slider__track-shell">
-      <div class="range-slider__rail">
-        <div class="range-slider__track"></div>
+  <div class="difficulty-ruler">
+    <div class="difficulty-ruler__controls">
+      <div
+        class="difficulty-ruler__viewport"
+        :class="{
+          'difficulty-ruler__viewport--dragging': dragging,
+          'difficulty-ruler__viewport--disabled': props.disabled,
+        }"
+        role="slider"
+        :tabindex="props.disabled ? -1 : 0"
+        :aria-disabled="props.disabled"
+        :aria-label="`${props.label ?? 'LEVEL'} ${rangeText}`"
+        :aria-valuemin="0"
+        :aria-valuemax="stopValues.length - 1"
+        :aria-valuenow="startIndex"
+        :aria-valuetext="rangeText"
+        @keydown="handleKeydown"
+        @pointerdown="handlePointerDown"
+        @pointermove="handlePointerMove"
+        @pointerup="finishDrag"
+        @pointercancel="finishDrag"
+      >
         <div
-          class="range-slider__track range-slider__track--active"
-          :style="{ left: `${leftPercent}%`, width: `${activeWidth}%` }"
-        ></div>
-
-        <div class="range-slider__stops" aria-hidden="true">
-          <span
-            v-for="(stop, index) in stopValues"
-            :key="stop"
-            class="range-slider__stop"
+          class="difficulty-ruler__track"
+          :style="trackStyle"
+          aria-hidden="true"
+        >
+          <button
+            v-for="(boundary, index) in boundaryValues"
+            :key="boundary"
+            class="difficulty-ruler__tick"
             :class="{
-              'range-slider__stop--active': index >= minIndex && index <= maxIndex,
+              'difficulty-ruler__tick--selected': index === startIndex || index === startIndex + 1,
             }"
-          ></span>
+            type="button"
+            tabindex="-1"
+            :disabled="props.disabled"
+            @click.stop="updateStartIndex(index > startIndex ? index - 1 : index)"
+          >
+            {{ formatDifficulty(boundary) }}
+          </button>
         </div>
-
-        <div
-          class="range-slider__handle"
-          :style="{ left: `calc(${leftPercent}% - 2px)` }"
-          aria-hidden="true"
-        ></div>
-        <div
-          class="range-slider__handle"
-          :style="{ left: `calc(${rightPercent}% - 2px)` }"
-          aria-hidden="true"
-        ></div>
-
-        <input
-          class="range-slider__input range-slider__input--min"
-          type="range"
-          :min="0"
-          :max="stopValues.length - 1"
-          :value="minIndex"
-          step="1"
-          @input="updateMinIndex(Number(($event.target as HTMLInputElement).value))"
-        />
-        <input
-          class="range-slider__input range-slider__input--max"
-          type="range"
-          :min="0"
-          :max="stopValues.length - 1"
-          :value="maxIndex"
-          step="1"
-          @input="updateMaxIndex(Number(($event.target as HTMLInputElement).value))"
-        />
+        <div class="difficulty-ruler__selection-line" aria-hidden="true"></div>
       </div>
     </div>
-
-    <p class="range-slider__label">
-      {{ props.label ?? 'LEVEL' }} {{ rangeText }}
-    </p>
   </div>
 </template>
 
 <style scoped>
-.range-slider {
+.difficulty-ruler {
   display: grid;
-  gap: 10px;
+  gap: 0;
 }
 
-.range-slider__track-shell {
+.difficulty-ruler__controls {
+  display: block;
+}
+
+.difficulty-ruler__viewport {
   position: relative;
-  height: 44px;
+  width: 100%;
+  height: 58px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
 }
 
-.range-slider__rail {
-  position: absolute;
-  top: 0;
-  right: 22px;
-  bottom: 0;
-  left: 22px;
+.difficulty-ruler__viewport:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(79, 55, 138, 0.14);
 }
 
-.range-slider__track {
+.difficulty-ruler__viewport--dragging {
+  cursor: grabbing;
+}
+
+.difficulty-ruler__viewport--disabled {
+  background: transparent;
+  cursor: default;
+  filter: grayscale(0.28);
+}
+
+.difficulty-ruler__track {
   position: absolute;
-  left: 0;
-  right: 0;
+  left: 50%;
   top: 50%;
-  height: 16px;
-  transform: translateY(-50%);
-  border-radius: 16px;
-  background: #e8def8;
-}
-
-.range-slider__track--active {
-  right: auto;
-  height: 8px;
-  border-radius: 999px;
-  background: #6750a4;
-}
-
-.range-slider__stops {
-  position: absolute;
-  inset: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  pointer-events: none;
+  gap: 8px;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
 }
 
-.range-slider__stop {
-  width: 4px;
+.difficulty-ruler__viewport--dragging .difficulty-ruler__track {
+  transition: none;
+}
+
+.difficulty-ruler__tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 58px;
+  width: 58px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: transparent;
+  color: rgba(79, 55, 138, 0.56);
+  font-family: var(--font-figma-ui);
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.difficulty-ruler__tick:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.difficulty-ruler__tick--selected {
+  color: #39256b;
+  font-size: 1.08rem;
+  font-weight: 800;
+}
+
+.difficulty-ruler__viewport--disabled .difficulty-ruler__tick {
+  color: rgba(87, 82, 96, 0.38);
+}
+
+.difficulty-ruler__viewport--disabled .difficulty-ruler__tick--selected {
+  color: rgba(72, 67, 80, 0.7);
+}
+
+.difficulty-ruler__selection-line {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 24px;
   height: 4px;
   border-radius: 999px;
-  background: rgba(103, 80, 164, 0.32);
-}
-
-.range-slider__stop--active {
   background: #6750a4;
-}
-
-.range-slider__handle {
-  position: absolute;
-  top: 50%;
-  width: 4px;
-  height: 44px;
-  transform: translateY(-50%);
-  border-radius: 2px;
-  background: #6750a4;
-  box-shadow: 0 1px 3px rgba(79, 55, 138, 0.18);
   pointer-events: none;
+  opacity: 1;
+  transform: translate(-50%, -50%) scaleX(1);
+  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.range-slider__input {
-  position: absolute;
-  inset: 0;
-  margin: 0;
-  width: 100%;
-  background: transparent;
-  pointer-events: none;
-  -webkit-appearance: none;
-  appearance: none;
+.difficulty-ruler__viewport--dragging .difficulty-ruler__selection-line {
+  opacity: 0.42;
+  transform: translate(-50%, -50%) scaleX(0.55);
 }
 
-.range-slider__input--min,
-.range-slider__input--max {
-  pointer-events: none;
-}
-
-.range-slider__input::-webkit-slider-runnable-track {
-  height: 44px;
-  background: transparent;
-}
-
-.range-slider__input::-webkit-slider-thumb {
-  width: 24px;
-  height: 44px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-  pointer-events: auto;
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-.range-slider__input::-moz-range-track {
-  height: 44px;
-  background: transparent;
-}
-
-.range-slider__input::-moz-range-thumb {
-  width: 24px;
-  height: 44px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-  pointer-events: auto;
-}
-
-.range-slider__label {
-  margin: 0;
-  color: #4f378a;
-  font-family: var(--font-figma-ui);
-  font-size: 0.92rem;
-  line-height: 1;
-  text-align: center;
-  letter-spacing: 0.02em;
+.difficulty-ruler__viewport--disabled .difficulty-ruler__selection-line {
+  background: rgba(112, 107, 120, 0.68);
+  opacity: 0.68;
 }
 </style>

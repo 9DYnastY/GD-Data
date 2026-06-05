@@ -24,7 +24,7 @@ import type {
   BjmaniaScoreFamily,
   BjmaniaScoreListItem,
 } from '../types/bjmania'
-import type { InstrumentKey, SongViewModel } from '../types/song'
+import type { InstrumentKey, LevelKey, SongViewModel } from '../types/song'
 
 type SearchSortOption =
   | 'id-asc'
@@ -41,8 +41,17 @@ type SongCatalogFilterKey = 'current' | 'deleted' | 'favorite' | 'classic' | 'no
 
 type SearchFilters = {
   versionOrder: number | null
-  difficultyMin: number
-  difficultyMax: number
+}
+
+type DifficultyMatch = {
+  level: LevelKey
+  difficultyCents: number
+}
+
+type SongListEntry = {
+  key: string
+  song: SongViewModel
+  difficultyMatch: DifficultyMatch | null
 }
 
 const SEARCH_STORAGE_KEY = 'gddata:last-search'
@@ -51,10 +60,18 @@ const VISIBLE_COVER_PRELOAD_LIMIT = 8
 const SKILL_COVER_PRELOAD_LIMIT_PER_FAMILY = 8
 const STARTUP_COVER_PRELOAD_TIMEOUT_MS = 2800
 const SONG_CARD_WIDTH = 375
-const FULL_DIFFICULTY_MIN = 0
-const FULL_DIFFICULTY_MAX = 99
-const DIFFICULTY_STOPS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99]
+const DIFFICULTY_WINDOW_MIN = 0
+const DIFFICULTY_WINDOW_MAX = 1000
+const DIFFICULTY_WINDOW_DEFAULT = 450
+const DIFFICULTY_WINDOW_SIZE = 50
+const DIFFICULTY_WINDOW_STEP = 50
 const INSTRUMENT_ORDER: InstrumentKey[] = ['drum', 'guitar', 'bass']
+const LEVEL_SORT_ORDER: Record<LevelKey, number> = {
+  basic: 0,
+  advanced: 1,
+  extreme: 2,
+  master: 3,
+}
 const GF_DELTA_VERSION_ORDER = 30
 const DM_DELTA_VERSION_ORDER = 29
 const INSTRUMENT_LABELS: Record<InstrumentKey, string> = {
@@ -149,11 +166,11 @@ const searchQuery = ref(
 const sortOption = ref<SearchSortOption>('id-desc')
 const selectedInstrument = ref<InstrumentKey>('drum')
 const selectedCatalogFilter = ref<SongCatalogFilterKey>('current')
+const difficultyModeEnabled = ref(false)
+const difficultyWindowStart = ref(DIFFICULTY_WINDOW_DEFAULT)
 const showInstrumentGuide = ref(false)
 const filters = reactive<SearchFilters>({
   versionOrder: null,
-  difficultyMin: FULL_DIFFICULTY_MIN,
-  difficultyMax: FULL_DIFFICULTY_MAX,
 })
 
 let stopSongCatalogUpdateListener: (() => void) | null = null
@@ -165,15 +182,13 @@ const SONG_FILTER_OPTIONS: Array<{ value: SongCatalogFilterKey; label: string }>
   { value: 'classic', label: '展示Classic曲目' },
   { value: 'non-classic', label: '隐藏Classic曲目' },
 ]
-const sortOptions: Array<{ label: string; value: SearchSortOption }> = [
+const baseSortOptions: Array<{ label: string; value: SearchSortOption }> = [
   { label: '默认-降序', value: 'id-desc' },
   { label: '默认-升序', value: 'id-asc' },
   { label: '标题-降序', value: 'title-desc' },
   { label: '标题-升序', value: 'title-asc' },
   { label: '艺术家-降序', value: 'artist-desc' },
   { label: '艺术家-升序', value: 'artist-asc' },
-  { label: 'MAS难度-降序', value: 'difficulty-desc' },
-  { label: 'MAS难度-升序', value: 'difficulty-asc' },
 ]
 
 function sortDefaultSkillRows(rows: BjmaniaScoreListItem[]) {
@@ -193,6 +208,26 @@ function buildCoverPreloadTargetsFromSongs(nextSongs: SongViewModel[], limit: nu
   }))
 }
 
+function buildCoverPreloadTargetsFromEntries(entries: SongListEntry[], limit: number) {
+  const seenMusicIds = new Set<number>()
+  const uniqueSongs: SongViewModel[] = []
+
+  for (const entry of entries) {
+    if (seenMusicIds.has(entry.song.musicId)) {
+      continue
+    }
+
+    seenMusicIds.add(entry.song.musicId)
+    uniqueSongs.push(entry.song)
+
+    if (uniqueSongs.length >= limit) {
+      break
+    }
+  }
+
+  return buildCoverPreloadTargetsFromSongs(uniqueSongs, limit)
+}
+
 function buildCoverPreloadTargetsFromSkillRows(rows: BjmaniaScoreListItem[], family: BjmaniaScoreFamily) {
   return sortDefaultSkillRows(filterScoresByFamily(rows, family))
     .slice(0, SKILL_COVER_PRELOAD_LIMIT_PER_FAMILY)
@@ -202,9 +237,9 @@ function buildCoverPreloadTargetsFromSkillRows(rows: BjmaniaScoreListItem[], fam
     }))
 }
 
-function preloadVisibleSongCovers(nextSongs: SongViewModel[]) {
+function preloadVisibleSongCovers(nextEntries: SongListEntry[]) {
   preloadCoverImages(
-    buildCoverPreloadTargetsFromSongs(nextSongs, VISIBLE_COVER_PRELOAD_LIMIT),
+    buildCoverPreloadTargetsFromEntries(nextEntries, VISIBLE_COVER_PRELOAD_LIMIT),
     {
       limit: VISIBLE_COVER_PRELOAD_LIMIT,
       concurrency: 2,
@@ -282,37 +317,83 @@ function getInstrumentDifficulty(song: SongViewModel, instrumentKey: InstrumentK
   return song.instruments.find((instrument) => instrument.key === instrumentKey) ?? null
 }
 
-function getSelectedInstrumentMaster(song: SongViewModel) {
+function matchesSearchQuery(song: SongViewModel, normalizedQuery: string) {
   return (
-    getInstrumentDifficulty(song, selectedInstrument.value)?.levels.find((level) => level.level === 'master')
-      ?.difficulty ?? null
+    normalizedQuery.length === 0 ||
+    song.searchText.includes(normalizedQuery) ||
+    String(song.musicId) === normalizedQuery
   )
 }
 
-function isFullDifficultyRange() {
-  return (
-    filters.difficultyMin === FULL_DIFFICULTY_MIN &&
-    filters.difficultyMax === FULL_DIFFICULTY_MAX
-  )
+function difficultyToCents(difficulty: number) {
+  return Math.round(difficulty * 100)
 }
 
-function matchesSelectedDifficultyRange(song: SongViewModel) {
-  if (isFullDifficultyRange()) {
-    return true
-  }
+function createDifficultyEntryKey(song: SongViewModel, match: DifficultyMatch) {
+  return `${song.musicId}-${selectedInstrument.value}-${match.level}-${match.difficultyCents}`
+}
 
+function getDifficultyModeMatches(song: SongViewModel): DifficultyMatch[] {
   const selectedDifficulty = getInstrumentDifficulty(song, selectedInstrument.value)
 
   if (!selectedDifficulty) {
+    return []
+  }
+
+  const minValue = difficultyWindowStart.value
+  const maxValue = difficultyWindowStart.value + DIFFICULTY_WINDOW_SIZE
+
+  return selectedDifficulty.levels.flatMap((level) => {
+    if (!level.available || level.difficulty === null) {
+      return []
+    }
+
+    const difficultyCents = difficultyToCents(level.difficulty)
+
+    const outsideWindow = difficultyCents < minValue || (
+      difficultyCents >= maxValue && maxValue < DIFFICULTY_WINDOW_MAX
+    )
+
+    if (outsideWindow) {
+      return []
+    }
+
+    return [{
+      level: level.level,
+      difficultyCents,
+    }]
+  })
+}
+
+function matchesCatalogFilter(song: SongViewModel) {
+  switch (selectedCatalogFilter.value) {
+    case 'deleted':
+      return song.metadata.isDeleted
+    case 'favorite':
+      return favoriteMusicIds.value.has(song.musicId)
+    case 'classic':
+      return song.metadata.isClassic
+    case 'non-classic':
+      return !song.metadata.isClassic && !song.metadata.isDeleted
+    case 'current':
+    default:
+      return !song.metadata.isDeleted
+  }
+}
+
+function matchesBaseSongFilters(song: SongViewModel, normalizedQuery: string) {
+  if (!matchesSearchQuery(song, normalizedQuery)) {
     return false
   }
 
-  const minValue = filters.difficultyMin / 10
-  const maxValue = filters.difficultyMax / 10
+  if (
+    filters.versionOrder !== null &&
+    resolveInstrumentVersionOrder(song.versionKey, selectedInstrument.value) !== filters.versionOrder
+  ) {
+    return false
+  }
 
-  return selectedDifficulty.levels.some((level) => {
-    return level.available && level.difficulty !== null && level.difficulty >= minValue && level.difficulty <= maxValue
-  })
+  return matchesCatalogFilter(song)
 }
 
 const selectedInstrumentLabel = computed(() => INSTRUMENT_LABELS[selectedInstrument.value])
@@ -344,8 +425,24 @@ const versionOptions = computed(() => {
   })
 })
 
+const sortOptions = computed<Array<{ label: string; value: SearchSortOption }>>(() => {
+  if (!difficultyModeEnabled.value) {
+    return baseSortOptions
+  }
+
+  return [
+    ...baseSortOptions,
+    { label: '难度-降序', value: 'difficulty-desc' },
+    { label: '难度-升序', value: 'difficulty-asc' },
+  ]
+})
+
 const hasActiveFilters = computed(() => {
-  return filters.versionOrder !== null || selectedCatalogFilter.value !== 'current' || !isFullDifficultyRange()
+  return (
+    difficultyModeEnabled.value ||
+    filters.versionOrder !== null ||
+    selectedCatalogFilter.value !== 'current'
+  )
 })
 
 const selectedVersionLabel = computed(() => {
@@ -361,7 +458,7 @@ const selectedCatalogFilterLabel = computed(() => {
 })
 
 const selectedSortLabel = computed(() => {
-  return sortOptions.find((option) => option.value === sortOption.value)?.label ?? '默认-降序'
+  return sortOptions.value.find((option) => option.value === sortOption.value)?.label ?? '默认-降序'
 })
 
 watch(
@@ -374,111 +471,108 @@ watch(
   { immediate: true },
 )
 
-const filteredSongs = computed(() => {
+function compareSongBySort(left: SongViewModel, right: SongViewModel, option: SearchSortOption) {
+  switch (option) {
+    case 'id-asc':
+      return (
+        resolveInstrumentVersionOrder(left.versionKey, selectedInstrument.value) -
+          resolveInstrumentVersionOrder(right.versionKey, selectedInstrument.value) ||
+        left.musicId - right.musicId
+      )
+    case 'id-desc':
+      return (
+        resolveInstrumentVersionOrder(right.versionKey, selectedInstrument.value) -
+          resolveInstrumentVersionOrder(left.versionKey, selectedInstrument.value) ||
+        Number(left.metadata.isClassic) - Number(right.metadata.isClassic) ||
+        right.musicId - left.musicId
+      )
+    case 'title-asc':
+      return (
+        left.sortKeys.titleAsciiOrder - right.sortKeys.titleAsciiOrder ||
+        compareText(left.displayTitle, right.displayTitle)
+      )
+    case 'title-desc':
+      return (
+        right.sortKeys.titleAsciiOrder - left.sortKeys.titleAsciiOrder ||
+        compareText(left.displayTitle, right.displayTitle)
+      )
+    case 'artist-asc':
+      return (
+        left.sortKeys.artistAsciiOrder - right.sortKeys.artistAsciiOrder ||
+        compareText(left.displayArtist, right.displayArtist)
+      )
+    case 'artist-desc':
+      return (
+        right.sortKeys.artistAsciiOrder - left.sortKeys.artistAsciiOrder ||
+        compareText(left.displayArtist, right.displayArtist)
+      )
+    default:
+      return 0
+  }
+}
+
+function compareDifficultyMatch(
+  left: SongListEntry,
+  right: SongListEntry,
+  direction: 'asc' | 'desc',
+) {
+  const leftMatch = left.difficultyMatch
+  const rightMatch = right.difficultyMatch
+
+  if (!leftMatch && !rightMatch) {
+    return compareSongBySort(left.song, right.song, 'id-desc')
+  }
+
+  if (!leftMatch) {
+    return 1
+  }
+
+  if (!rightMatch) {
+    return -1
+  }
+
+  const difficultyDelta = direction === 'asc'
+    ? leftMatch.difficultyCents - rightMatch.difficultyCents
+    : rightMatch.difficultyCents - leftMatch.difficultyCents
+
+  return (
+    difficultyDelta ||
+    compareText(left.song.displayTitle, right.song.displayTitle) ||
+    LEVEL_SORT_ORDER[leftMatch.level] - LEVEL_SORT_ORDER[rightMatch.level] ||
+    left.song.musicId - right.song.musicId
+  )
+}
+
+function compareSongEntry(left: SongListEntry, right: SongListEntry) {
+  switch (sortOption.value) {
+    case 'difficulty-asc':
+      return compareDifficultyMatch(left, right, 'asc')
+    case 'difficulty-desc':
+      return compareDifficultyMatch(left, right, 'desc')
+    default:
+      return compareSongBySort(left.song, right.song, sortOption.value)
+  }
+}
+
+const filteredSongEntries = computed<SongListEntry[]>(() => {
   const normalizedQuery = searchQuery.value.trim().toLowerCase()
+  const baseSongs = displayableSongs.value.filter((song) => matchesBaseSongFilters(song, normalizedQuery))
 
-  const nextSongs = displayableSongs.value.filter((song) => {
-    const matchesSearch =
-      normalizedQuery.length === 0 ||
-      song.searchText.includes(normalizedQuery) ||
-      String(song.musicId) === normalizedQuery
+  if (difficultyModeEnabled.value) {
+    return baseSongs
+      .flatMap((song) => getDifficultyModeMatches(song).map((match) => ({
+        key: createDifficultyEntryKey(song, match),
+        song,
+        difficultyMatch: match,
+      })))
+      .sort(compareSongEntry)
+  }
 
-    if (!matchesSearch) {
-      return false
-    }
-
-    if (
-      filters.versionOrder !== null &&
-      resolveInstrumentVersionOrder(song.versionKey, selectedInstrument.value) !== filters.versionOrder
-    ) {
-      return false
-    }
-
-    switch (selectedCatalogFilter.value) {
-      case 'deleted':
-        if (!song.metadata.isDeleted) {
-          return false
-        }
-        break
-      case 'favorite':
-        if (!favoriteMusicIds.value.has(song.musicId)) {
-          return false
-        }
-        break
-      case 'classic':
-        if (!song.metadata.isClassic) {
-          return false
-        }
-        break
-      case 'non-classic':
-        if (song.metadata.isClassic || song.metadata.isDeleted) {
-          return false
-        }
-        break
-      case 'current':
-      default:
-        if (song.metadata.isDeleted) {
-          return false
-        }
-        break
-    }
-
-    if (!matchesSelectedDifficultyRange(song)) {
-      return false
-    }
-
-    return true
-  })
-
-  return nextSongs.slice().sort((left, right) => {
-    switch (sortOption.value) {
-      case 'id-asc':
-        return (
-          resolveInstrumentVersionOrder(left.versionKey, selectedInstrument.value) -
-            resolveInstrumentVersionOrder(right.versionKey, selectedInstrument.value) ||
-          left.musicId - right.musicId
-        )
-      case 'id-desc':
-        return (
-          resolveInstrumentVersionOrder(right.versionKey, selectedInstrument.value) -
-            resolveInstrumentVersionOrder(left.versionKey, selectedInstrument.value) ||
-          Number(left.metadata.isClassic) - Number(right.metadata.isClassic) ||
-          right.musicId - left.musicId
-        )
-      case 'title-asc':
-        return (
-          left.sortKeys.titleAsciiOrder - right.sortKeys.titleAsciiOrder ||
-          compareText(left.displayTitle, right.displayTitle)
-        )
-      case 'title-desc':
-        return (
-          right.sortKeys.titleAsciiOrder - left.sortKeys.titleAsciiOrder ||
-          compareText(left.displayTitle, right.displayTitle)
-        )
-      case 'artist-asc':
-        return (
-          left.sortKeys.artistAsciiOrder - right.sortKeys.artistAsciiOrder ||
-          compareText(left.displayArtist, right.displayArtist)
-        )
-      case 'artist-desc':
-        return (
-          right.sortKeys.artistAsciiOrder - left.sortKeys.artistAsciiOrder ||
-          compareText(left.displayArtist, right.displayArtist)
-        )
-      case 'difficulty-asc':
-        return (
-          compareMasterDifficulty(left, right, 'asc') ||
-          compareText(left.displayTitle, right.displayTitle)
-        )
-      case 'difficulty-desc':
-        return (
-          compareMasterDifficulty(left, right, 'desc') ||
-          compareText(left.displayTitle, right.displayTitle)
-        )
-      default:
-        return 0
-    }
-  })
+  return baseSongs.map((song) => ({
+    key: String(song.musicId),
+    song,
+    difficultyMatch: null,
+  })).sort(compareSongEntry)
 })
 
 const {
@@ -488,7 +582,7 @@ const {
   isFastScrolling: isFastSongScrolling,
   measureElement: measureSongElement,
   resetMeasurements: resetSongMeasurements,
-} = useWindowVirtualList(filteredSongs, {
+} = useWindowVirtualList(filteredSongEntries, {
   estimateSize: 199,
   gap: 36,
   overscan: 900,
@@ -539,16 +633,28 @@ watch(debugModeEnabled, () => {
   void resetSongMeasurements()
 }, { flush: 'post' })
 
+watch(difficultyModeEnabled, (enabled) => {
+  openMenu.value = null
+
+  if (enabled) {
+    sortOption.value = 'difficulty-asc'
+  } else if (sortOption.value === 'difficulty-asc' || sortOption.value === 'difficulty-desc') {
+    sortOption.value = 'id-desc'
+  }
+
+  void resetSongMeasurements()
+})
+
 function resetFilters() {
   filters.versionOrder = null
   selectedCatalogFilter.value = 'current'
-  filters.difficultyMin = FULL_DIFFICULTY_MIN
-  filters.difficultyMax = FULL_DIFFICULTY_MAX
 }
 
 function clearAllConditions() {
   searchQuery.value = ''
   sortOption.value = 'id-desc'
+  difficultyModeEnabled.value = false
+  difficultyWindowStart.value = DIFFICULTY_WINDOW_DEFAULT
   resetFilters()
   showFilters.value = false
   openMenu.value = null
@@ -568,6 +674,11 @@ function toggleFilters() {
   if (!showFilters.value) {
     openMenu.value = null
   }
+}
+
+function toggleDifficultyMode() {
+  difficultyModeEnabled.value = !difficultyModeEnabled.value
+  openMenu.value = null
 }
 
 function submitSearch() {
@@ -675,14 +786,14 @@ onMounted(async () => {
   stopSongCatalogUpdateListener = onSongCatalogUpdated((nextSongs) => {
     songs.value = nextSongs
     void resetSongMeasurements()
-    preloadVisibleSongCovers(filteredSongs.value)
+    preloadVisibleSongCovers(filteredSongEntries.value)
     preloadCachedSkillCovers(nextSongs)
   })
 
   try {
     songs.value = await loadSongCatalog()
     await preloadCoverImagesNow(
-      buildCoverPreloadTargetsFromSongs(filteredSongs.value, VISIBLE_COVER_PRELOAD_LIMIT),
+      buildCoverPreloadTargetsFromEntries(filteredSongEntries.value, VISIBLE_COVER_PRELOAD_LIMIT),
       {
         limit: VISIBLE_COVER_PRELOAD_LIMIT,
         concurrency: 3,
@@ -712,30 +823,6 @@ onBeforeUnmount(() => {
   stopSongCatalogUpdateListener = null
 })
 
-function compareMasterDifficulty(
-  left: SongViewModel,
-  right: SongViewModel,
-  direction: 'asc' | 'desc',
-) {
-  const leftDifficulty = getSelectedInstrumentMaster(left)
-  const rightDifficulty = getSelectedInstrumentMaster(right)
-
-  if (leftDifficulty === null && rightDifficulty === null) {
-    return 0
-  }
-
-  if (leftDifficulty === null) {
-    return 1
-  }
-
-  if (rightDifficulty === null) {
-    return -1
-  }
-
-  return direction === 'asc'
-    ? leftDifficulty - rightDifficulty
-    : rightDifficulty - leftDifficulty
-}
 </script>
 
 <template>
@@ -893,15 +980,32 @@ function compareMasterDifficulty(
             </div>
           </div>
 
-          <div class="filter-drawer__slider">
-            <DifficultyRangeSlider
-              :stops="DIFFICULTY_STOPS"
-              :min-value="filters.difficultyMin"
-              :max-value="filters.difficultyMax"
-              label="LEVEL"
-              @update:min-value="filters.difficultyMin = $event"
-              @update:max-value="filters.difficultyMax = $event"
-            />
+          <div class="filter-drawer__difficulty-row">
+            <div class="filter-drawer__difficulty-track">
+              <DifficultyRangeSlider
+                :start-value="difficultyWindowStart"
+                :min-value="DIFFICULTY_WINDOW_MIN"
+                :max-value="DIFFICULTY_WINDOW_MAX"
+                :window-size="DIFFICULTY_WINDOW_SIZE"
+                :step-value="DIFFICULTY_WINDOW_STEP"
+                :disabled="!difficultyModeEnabled"
+                label="LEVEL"
+                @update:start-value="difficultyWindowStart = $event"
+              />
+            </div>
+
+            <button
+              class="difficulty-filter-toggle"
+              :class="{ 'difficulty-filter-toggle--active': difficultyModeEnabled }"
+              type="button"
+              :aria-pressed="difficultyModeEnabled"
+              @click="toggleDifficultyMode"
+            >
+              <span class="difficulty-filter-toggle__text">按难度</span>
+              <span class="difficulty-filter-toggle__switch" aria-hidden="true">
+                <span class="difficulty-filter-toggle__thumb"></span>
+              </span>
+            </button>
           </div>
         </section>
       </transition>
@@ -933,7 +1037,7 @@ function compareMasterDifficulty(
 
       <section v-else :ref="setSongListRef" class="list-section">
         <EmptyState
-          v-if="filteredSongs.length === 0"
+          v-if="filteredSongEntries.length === 0"
           :has-filters="hasActiveFilters"
           :query="searchQuery"
           @reset="clearAllConditions"
@@ -946,7 +1050,7 @@ function compareMasterDifficulty(
         >
           <div
             v-for="virtualSong in virtualSongs"
-            :key="virtualSong.item.musicId"
+            :key="virtualSong.item.key"
             :ref="(element) => measureSongElement(virtualSong.index, element)"
             class="virtual-list__item"
             :style="{ transform: `translateY(${virtualSong.start}px)` }"
@@ -955,7 +1059,8 @@ function compareMasterDifficulty(
               :animate-cover-loading="!isFastSongScrolling"
               :card-scale="songCardScale"
               :eager-cover="virtualSong.index < VISIBLE_COVER_PRELOAD_LIMIT"
-              :song="virtualSong.item"
+              :highlight-level="virtualSong.item.difficultyMatch?.level ?? null"
+              :song="virtualSong.item.song"
               :selected-instrument="selectedInstrument"
             />
             <section
@@ -965,7 +1070,7 @@ function compareMasterDifficulty(
             >
               <div class="song-debug-grid">
                 <div
-                  v-for="debugRow in songMdbDebugRows(virtualSong.item)"
+                  v-for="debugRow in songMdbDebugRows(virtualSong.item.song)"
                   :key="debugRow.label"
                   class="song-debug-row"
                 >
@@ -1005,10 +1110,6 @@ function compareMasterDifficulty(
   width: min(100%, 403px);
   margin: 0 auto;
   padding: var(--home-content-top-padding) 14px 36px;
-}
-
-.load-more-card {
-  backdrop-filter: blur(10px);
 }
 
 .top-shell {
@@ -1143,6 +1244,89 @@ function compareMasterDifficulty(
   flex-wrap: nowrap;
 }
 
+.filter-drawer__difficulty-row {
+  display: flex;
+  align-items: center;
+  width: min(100%, 360px);
+  margin: 14px auto 0;
+  gap: 9px;
+}
+
+.filter-drawer__difficulty-track {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.difficulty-filter-toggle {
+  flex: 0 0 72px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 5px;
+  height: 58px;
+  min-height: 58px;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(79, 55, 138, 0.68);
+  font-family: 'Roboto', var(--font-sans);
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.difficulty-filter-toggle--active {
+  color: #4f378a;
+}
+
+.difficulty-filter-toggle:active {
+  transform: scale(0.98);
+}
+
+.difficulty-filter-toggle:focus-visible {
+  outline: none;
+}
+
+.difficulty-filter-toggle__text {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.difficulty-filter-toggle__switch {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(79, 55, 138, 0.18);
+  transition: background 0.16s ease;
+}
+
+.difficulty-filter-toggle--active .difficulty-filter-toggle__switch {
+  background: #4f378a;
+}
+
+.difficulty-filter-toggle__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(79, 55, 138, 0.74);
+  transition:
+    background 0.16s ease,
+    transform 0.16s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.difficulty-filter-toggle--active .difficulty-filter-toggle__thumb {
+  background: #ffffff;
+  transform: translateX(16px);
+}
+
 .pill-menu {
   position: relative;
   z-index: 2;
@@ -1269,10 +1453,6 @@ function compareMasterDifficulty(
   font-weight: 500;
 }
 
-.filter-drawer__slider {
-  margin-top: 22px;
-}
-
 .list-section {
   display: grid;
   gap: 36px;
@@ -1336,8 +1516,7 @@ function compareMasterDifficulty(
   overflow-wrap: anywhere;
 }
 
-.state-card,
-.load-more-card {
+.state-card {
   padding: 18px;
   border: 2px solid rgba(47, 0, 178, 0.72);
   border-radius: 18px;
@@ -1351,20 +1530,6 @@ function compareMasterDifficulty(
 
 .state-card--error {
   color: #a81f47;
-}
-
-.load-more-card {
-  display: grid;
-  gap: 10px;
-  justify-items: center;
-}
-
-.load-more-card p {
-  margin: 0;
-  color: rgba(70, 61, 95, 0.9);
-  font-size: 0.76rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
 }
 
 .instrument-fab {
