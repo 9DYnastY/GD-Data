@@ -2,6 +2,7 @@ import type { InstrumentKey, LevelKey } from '../types/song'
 import { resolveDtxChart } from './chart-preview-manifest'
 import { DtxFileParser } from './chart-preview-parser'
 import { DtxCanvasPositioner } from './chart-preview-positioner'
+import { preloadChartImages } from './chart-preview-renderer'
 import type { DtxChartMode, DtxDifficultyLabel, DtxDrawingConfig, DtxGameMode, LoadedDtxChartPreview } from './chart-preview-types'
 
 const GAME_MODE_BY_INSTRUMENT: Record<InstrumentKey, DtxGameMode> = {
@@ -54,6 +55,7 @@ export async function loadDtxChartPreview(
     throw new Error('暂未收录该谱面预览')
   }
 
+  const chartImagesPromise = preloadChartImages()
   const response = await fetch(chart.url, { cache: 'force-cache' })
 
   if (!response.ok) {
@@ -78,6 +80,7 @@ export async function loadDtxChartPreview(
     isLevelShown: true,
   }
   const dtxJson = parser.getDtxJson()
+  await chartImagesPromise
   const canvasData = new DtxCanvasPositioner(dtxJson, drawingConfig).getCanvasDataForDrawing()
 
   return {

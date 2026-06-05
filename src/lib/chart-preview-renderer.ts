@@ -94,6 +94,10 @@ export function loadChartImage(name: string) {
   return imagePromise
 }
 
+export async function preloadChartImages(names = Object.keys(ASSET_URLS)) {
+  await Promise.all(names.map((name) => loadChartImage(name)))
+}
+
 export function getLoadedChartImage(name: string) {
   if (resolvedImageCache.has(name)) {
     return resolvedImageCache.get(name) ?? null
