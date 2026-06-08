@@ -60,11 +60,12 @@ const VISIBLE_COVER_PRELOAD_LIMIT = 8
 const SKILL_COVER_PRELOAD_LIMIT_PER_FAMILY = 8
 const STARTUP_COVER_PRELOAD_TIMEOUT_MS = 2800
 const SONG_CARD_WIDTH = 375
-const DIFFICULTY_WINDOW_MIN = 0
+const DIFFICULTY_WINDOW_MIN = 100
 const DIFFICULTY_WINDOW_MAX = 1000
 const DIFFICULTY_WINDOW_DEFAULT = 450
 const DIFFICULTY_WINDOW_SIZE = 50
 const DIFFICULTY_WINDOW_STEP = 50
+const DIFFICULTY_FINE_STEP = 10
 const INSTRUMENT_ORDER: InstrumentKey[] = ['drum', 'guitar', 'bass']
 const LEVEL_SORT_ORDER: Record<LevelKey, number> = {
   basic: 0,
@@ -168,6 +169,7 @@ const selectedInstrument = ref<InstrumentKey>('drum')
 const selectedCatalogFilter = ref<SongCatalogFilterKey>('current')
 const difficultyModeEnabled = ref(false)
 const difficultyWindowStart = ref(DIFFICULTY_WINDOW_DEFAULT)
+const difficultyWindowFineOffset = ref(0)
 const showInstrumentGuide = ref(false)
 const filters = reactive<SearchFilters>({
   versionOrder: null,
@@ -340,7 +342,7 @@ function getDifficultyModeMatches(song: SongViewModel): DifficultyMatch[] {
     return []
   }
 
-  const minValue = difficultyWindowStart.value
+  const minValue = difficultyWindowStart.value + difficultyWindowFineOffset.value
   const maxValue = difficultyWindowStart.value + DIFFICULTY_WINDOW_SIZE
 
   return selectedDifficulty.levels.flatMap((level) => {
@@ -350,9 +352,10 @@ function getDifficultyModeMatches(song: SongViewModel): DifficultyMatch[] {
 
     const difficultyCents = difficultyToCents(level.difficulty)
 
-    const outsideWindow = difficultyCents < minValue || (
-      difficultyCents >= maxValue && maxValue < DIFFICULTY_WINDOW_MAX
-    )
+    const outsideWindow =
+      difficultyCents < minValue ||
+      difficultyCents > DIFFICULTY_WINDOW_MAX ||
+      (difficultyCents >= maxValue && maxValue < DIFFICULTY_WINDOW_MAX)
 
     if (outsideWindow) {
       return []
@@ -638,8 +641,12 @@ watch(difficultyModeEnabled, (enabled) => {
 
   if (enabled) {
     sortOption.value = 'difficulty-asc'
-  } else if (sortOption.value === 'difficulty-asc' || sortOption.value === 'difficulty-desc') {
-    sortOption.value = 'id-desc'
+  } else {
+    difficultyWindowFineOffset.value = 0
+
+    if (sortOption.value === 'difficulty-asc' || sortOption.value === 'difficulty-desc') {
+      sortOption.value = 'id-desc'
+    }
   }
 
   void resetSongMeasurements()
@@ -655,6 +662,7 @@ function clearAllConditions() {
   sortOption.value = 'id-desc'
   difficultyModeEnabled.value = false
   difficultyWindowStart.value = DIFFICULTY_WINDOW_DEFAULT
+  difficultyWindowFineOffset.value = 0
   resetFilters()
   showFilters.value = false
   openMenu.value = null
@@ -984,13 +992,16 @@ onBeforeUnmount(() => {
             <div class="filter-drawer__difficulty-track">
               <DifficultyRangeSlider
                 :start-value="difficultyWindowStart"
+                :fine-offset="difficultyWindowFineOffset"
                 :min-value="DIFFICULTY_WINDOW_MIN"
                 :max-value="DIFFICULTY_WINDOW_MAX"
                 :window-size="DIFFICULTY_WINDOW_SIZE"
                 :step-value="DIFFICULTY_WINDOW_STEP"
+                :fine-step-value="DIFFICULTY_FINE_STEP"
                 :disabled="!difficultyModeEnabled"
                 label="LEVEL"
                 @update:start-value="difficultyWindowStart = $event"
+                @update:fine-offset="difficultyWindowFineOffset = $event"
               />
             </div>
 
