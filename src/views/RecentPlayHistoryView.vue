@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+import type { RouteLocationRaw } from 'vue-router'
 import RecentPlayCard from '../components/RecentPlayCard.vue'
 import dmModeToggleSrc from '../assets/skill-toggle/dm-mode.svg'
 import gfModeToggleSrc from '../assets/skill-toggle/gf-mode.svg'
@@ -177,6 +178,27 @@ function rowKey(row: BjmaniaRecentListItem, index: number) {
   return `${row.timestamp}-${row.musicId ?? 'unknown'}-${row.instrument ?? 'unknown'}-${row.level ?? 'unknown'}-${index}`
 }
 
+function buildSongDetailRoute(row: BjmaniaRecentListItem): RouteLocationRaw | null {
+  if (row.musicId === null) {
+    return null
+  }
+
+  return {
+    name: 'song-detail',
+    params: { musicId: row.musicId },
+    query: {
+      instrument: row.instrument ?? undefined,
+      version: snapshot.value?.currentVersion ?? requestedMdbVersion.value ?? undefined,
+    },
+  }
+}
+
+const filteredRowEntries = computed(() => filteredRows.value.map((row, index) => ({
+  row,
+  key: rowKey(row, index),
+  detailRoute: buildSongDetailRoute(row),
+})))
+
 function mappingDebugRows(row: BjmaniaRecentListItem) {
   const payload = row.payload
   const mappedRows = [
@@ -286,12 +308,20 @@ onBeforeUnmount(() => {
         aria-label="最近游玩记录"
       >
         <div
-          v-for="(row, index) in filteredRows"
-          :key="rowKey(row, index)"
+          v-for="entry in filteredRowEntries"
+          :key="entry.key"
           class="recent-history-view__card-shell"
         >
           <div class="recent-history-view__card-frame">
-            <RecentPlayCard :row="row" />
+            <RouterLink
+              v-if="entry.detailRoute"
+              class="recent-history-view__card-link"
+              :to="entry.detailRoute"
+              :aria-label="`查看 ${entry.row.song?.displayTitle ?? `Music #${entry.row.musicId}`} 的歌曲详情`"
+            >
+              <RecentPlayCard :row="entry.row" />
+            </RouterLink>
+            <RecentPlayCard v-else :row="entry.row" />
           </div>
           <section
             v-if="debugModeEnabled"
@@ -300,7 +330,7 @@ onBeforeUnmount(() => {
           >
             <div class="recent-history-view__debug-grid">
               <div
-                v-for="debugRow in mappingDebugRows(row)"
+                v-for="debugRow in mappingDebugRows(entry.row)"
                 :key="debugRow.label"
                 class="recent-history-view__debug-row"
               >
@@ -310,7 +340,7 @@ onBeforeUnmount(() => {
             </div>
             <details class="recent-history-view__debug-details">
               <summary>raw payload</summary>
-              <pre>{{ mappingDebugPayloadJson(row) }}</pre>
+              <pre>{{ mappingDebugPayloadJson(entry.row) }}</pre>
             </details>
           </section>
         </div>
@@ -471,7 +501,30 @@ onBeforeUnmount(() => {
   overflow: visible;
 }
 
+.recent-history-view__card-link {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.recent-history-view__card-link:focus-visible {
+  outline: none;
+}
+
+.recent-history-view__card-link:focus-visible :deep(.recent-play-card) {
+  filter: drop-shadow(0 0 0.5rem rgba(79, 55, 138, 0.32));
+}
+
 .recent-history-view__card-frame > :deep(.recent-play-card) {
+  transform: scale(var(--recent-card-scale));
+  transform-origin: top left;
+}
+
+.recent-history-view__card-link :deep(.recent-play-card) {
   transform: scale(var(--recent-card-scale));
   transform-origin: top left;
 }
