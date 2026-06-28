@@ -19,18 +19,6 @@ import {
   startAppUpdateDownload,
   syncNativeAppUpdateState,
 } from './lib/app-update'
-import {
-  availableSongListUpdate,
-  checkForSongListUpdate,
-  closeSongListUpdateDialog,
-  songListUpdateDialogVisible,
-  songListUpdateError,
-  songListUpdateIsBusy,
-  songListUpdateProgressDetail,
-  songListUpdateProgressRatio,
-  songListUpdateState,
-  songListUpdateStatusMessage,
-} from './lib/song-catalog'
 
 const MAIN_ROUTE_ORDER: Record<string, number> = {
   home: 0,
@@ -300,10 +288,6 @@ onMounted(() => {
   void checkForAppUpdate('auto').catch(() => {
     // Automatic update checks should not interrupt normal startup.
   })
-  void checkForSongListUpdate().catch(() => {
-    // Song list update checks should not interrupt normal startup.
-  })
-
   if (backgroundVideoRef.value && backgroundVideoRef.value.readyState >= 2) {
     backgroundVideoReady.value = true
   }
@@ -439,47 +423,6 @@ onBeforeUnmount(() => {
             @click="handleStartAppUpdateDownload"
           >
             {{ appUpdatePrimaryActionLabel }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </transition>
-  <transition name="app-update-dialog">
-    <div
-      v-if="songListUpdateDialogVisible && availableSongListUpdate"
-      class="app-update-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="song-list-update-dialog-title"
-    >
-      <div class="app-update-dialog__card">
-        <h2 id="song-list-update-dialog-title">
-          曲库更新 {{ availableSongListUpdate.manifest.catalogVersion }}
-        </h2>
-        <ul v-if="availableSongListUpdate.manifest.notes.length" class="app-update-dialog__notes">
-          <li v-for="note in availableSongListUpdate.manifest.notes" :key="note">{{ note }}</li>
-        </ul>
-        <div v-if="songListUpdateStatusMessage" class="app-update-dialog__progress-block">
-          <div class="app-update-dialog__progress-text">
-            <span>{{ songListUpdateStatusMessage }}</span>
-            <span v-if="songListUpdateProgressDetail">{{ songListUpdateProgressDetail }}</span>
-          </div>
-          <div class="app-update-dialog__progress-track" aria-hidden="true">
-            <div
-              class="app-update-dialog__progress-fill"
-              :class="{ 'app-update-dialog__progress-fill--indeterminate': songListUpdateProgressRatio === null && songListUpdateState === 'downloading' }"
-              :style="songListUpdateProgressRatio === null ? undefined : { transform: `scaleX(${songListUpdateProgressRatio})` }"
-            ></div>
-          </div>
-        </div>
-        <p v-if="songListUpdateError" class="app-update-dialog__error">{{ songListUpdateError }}</p>
-        <div v-if="!songListUpdateIsBusy && songListUpdateState === 'error'" class="app-update-dialog__actions">
-          <button
-            class="app-update-dialog__button"
-            type="button"
-            @click="closeSongListUpdateDialog"
-          >
-            知道了
           </button>
         </div>
       </div>

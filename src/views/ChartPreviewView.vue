@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { App } from '@capacitor/app'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DtxChartCanvas from '../components/DtxChartCanvas.vue'
 import DtxRealtimeCanvas from '../components/DtxRealtimeCanvas.vue'
@@ -9,14 +10,16 @@ import playIconSrc from '../assets/chart-preview/note-play.png'
 import {
   getAvailableDtxInstruments,
   getAvailableDtxLevels,
-  hasLoadedDtxChartSet,
+  hasDtxChartAudio,
   loadDtxChartManifest,
 } from '../lib/chart-preview-manifest'
+import { loadChartAudio } from '../lib/chart-preview-audio'
 import { loadDtxChartPreview } from '../lib/chart-preview-loader'
 import { loadSongByMusicId } from '../lib/song-catalog'
 import { useDebugMode } from '../lib/debug-mode'
 import { REALTIME_BASE_PIXELS_PER_SECOND } from '../lib/chart-preview-realtime-renderer'
 import { getFullBodyFrameWidth } from '../lib/chart-preview-positioner'
+import type { LoadedChartAudio } from '../lib/chart-preview-audio'
 import type { DtxChartMode, LoadedDtxChartPreview } from '../lib/chart-preview-types'
 import type { DtxChartManifest } from '../lib/chart-preview-manifest'
 import type { InstrumentKey, LevelKey, SongViewModel } from '../types/song'
@@ -32,6 +35,7 @@ interface LevelOption {
   label: string
   difficultyText: string
   available: boolean
+  hasAudio: boolean
 }
 
 interface ChartModeOption {
@@ -95,23 +99,35 @@ const staticRenderedZoom = ref(1)
 const staticPanX = ref(0)
 const staticPanY = ref(0)
 const playing = ref(false)
-const playbackProgress = ref(0)
+const playbackTimeSeconds = ref(0)
+const audioDurationSeconds = ref(0)
+const audioLoading = ref(false)
+const audioPlaybackPending = ref(false)
+const audioTrackEnabled = ref(false)
+const playbackNotice = ref('')
 const rafAverageIntervalMs = ref(0)
 const rafLastIntervalMs = ref(0)
 let loadSequence = 0
+let audioLoadSequence = 0
 let playbackFrame = 0
 let playbackStartedAt = 0
-let playbackStartedProgress = 0
+let playbackStartedTime = 0
 let rafDebugFrame = 0
 let rafDebugLastTimestamp = 0
 let rafDebugAverageInterval = 0
 let activeProgressPointerId: number | null = null
 let activeChartPointerId: number | null = null
-let chartDragStartProgress = 0
+let chartDragStartTime = 0
+let resumeAfterProgressSeek = false
+let resumeAfterChartSeek = false
 let chartDragStartY = 0
 let viewerResizeObserver: ResizeObserver | null = null
 let staticGesture: StaticGesture | null = null
 let staticZoomCommitTimer: number | null = null
+let playbackNoticeTimer: number | null = null
+let loadedChartAudio: LoadedChartAudio | null = null
+let appStateChangeListener: { remove: () => Promise<void> } | null = null
+let viewUnmounted = false
 const staticPointers = new Map<number, StaticPointerPosition>()
 
 const INSTRUMENT_LABELS: Record<InstrumentKey, string> = {
@@ -153,7 +169,9 @@ const RAF_DEBUG_SMOOTHING = 0.12
 
 const instrumentOptions = computed<InstrumentOption[]>(() => {
   const musicId = getRouteMusicId()
-  const availableInstruments = musicId !== null ? getAvailableDtxInstruments(musicId, chartManifest.value) : []
+  const availableInstruments = musicId !== null
+    ? getSelectableDtxInstruments(musicId, chartManifest.value)
+    : []
 
   return INSTRUMENT_ORDER
     .map((instrument) => ({
@@ -165,7 +183,9 @@ const instrumentOptions = computed<InstrumentOption[]>(() => {
 
 const levelOptions = computed<LevelOption[]>(() => {
   const musicId = getRouteMusicId()
-  const levels = musicId !== null ? getAvailableDtxLevels(musicId, selectedInstrumentKey.value, chartManifest.value) : []
+  const levels = musicId !== null
+    ? getSelectableDtxLevels(musicId, selectedInstrumentKey.value, chartManifest.value)
+    : []
   const songLevels = song.value?.instruments.find((instrument) => {
     return instrument.key === selectedInstrumentKey.value
   })?.levels ?? []
@@ -180,19 +200,33 @@ const levelOptions = computed<LevelOption[]>(() => {
         label: LEVEL_LABELS[level],
         difficultyText: available ? songLevel?.difficultyText ?? '-.-' : '-.-',
         available,
+        hasAudio: Boolean(
+          available
+          && musicId !== null
+          && hasDtxChartAudio(musicId, selectedInstrumentKey.value, level, chartManifest.value),
+        ),
       }
     })
 })
 
+const dtxDurationSeconds = computed(() => preview.value?.dtxJson.songInfo.songDuration ?? 0)
+const timelineDurationSeconds = computed(() => (
+  audioDurationSeconds.value > 0 ? audioDurationSeconds.value : dtxDurationSeconds.value
+))
+const playbackProgress = computed(() => {
+  const duration = timelineDurationSeconds.value
+  return duration > 0 ? Math.min(1, Math.max(0, playbackTimeSeconds.value / duration)) : 0
+})
+const chartPlaybackProgress = computed(() => {
+  const duration = dtxDurationSeconds.value
+  return duration > 0 ? Math.min(1, Math.max(0, playbackTimeSeconds.value / duration)) : 0
+})
 const progressRangeValue = computed(() => Math.round(playbackProgress.value * PROGRESS_RANGE_MAX))
 const progressThumbLeft = computed(() => {
   return `calc(${PROGRESS_EDGE_INSET_PX}px + (100% - ${PROGRESS_EDGE_INSET_PX * 2}px) * ${playbackProgress.value})`
 })
-const totalTimeLabel = computed(() => formatTime(preview.value?.dtxJson.songInfo.songDuration ?? 0))
-const currentTimeLabel = computed(() => {
-  const duration = preview.value?.dtxJson.songInfo.songDuration ?? 0
-  return formatTime(duration * playbackProgress.value)
-})
+const totalTimeLabel = computed(() => formatTime(timelineDurationSeconds.value))
+const currentTimeLabel = computed(() => formatTime(playbackTimeSeconds.value))
 const canDecreaseSpeed = computed(() => selectedSpeed.value > SPEED_MIN)
 const canIncreaseSpeed = computed(() => selectedSpeed.value < SPEED_MAX)
 const canAdjustBarsPerColumn = computed(() => chartRenderMode.value === 'static')
@@ -219,8 +253,14 @@ const chartDragging = computed(() => {
 const dynamicChartEnabled = computed(() => {
   return chartRenderMode.value === 'realtime'
 })
+const audioTrackAvailable = computed(() => Boolean(preview.value?.chart.audioUrl))
 const playbackDisabled = computed(() => {
-  return chartRenderMode.value === 'static'
+  return (
+    chartRenderMode.value === 'static'
+    || !preview.value
+    || audioLoading.value
+    || audioPlaybackPending.value
+  )
 })
 const staticFitZoom = computed(() => {
   const canvasWidth = preview.value?.canvasData[0]?.canvasSize.width ?? 0
@@ -256,6 +296,28 @@ function getFirstQueryValue(value: unknown) {
 function getRouteMusicId() {
   const musicId = Number(route.params.musicId)
   return Number.isFinite(musicId) ? musicId : null
+}
+
+function getSelectableDtxLevels(
+  musicId: number,
+  instrument: InstrumentKey,
+  manifest = chartManifest.value,
+) {
+  const officialLevels = new Set(
+    song.value?.instruments
+      .find((entry) => entry.key === instrument)
+      ?.levels
+      .filter((level) => level.available)
+      .map((level) => level.level) ?? [],
+  )
+
+  return getAvailableDtxLevels(musicId, instrument, manifest)
+    .filter((level) => officialLevels.has(level))
+}
+
+function getSelectableDtxInstruments(musicId: number, manifest = chartManifest.value) {
+  return getAvailableDtxInstruments(musicId, manifest)
+    .filter((instrument) => getSelectableDtxLevels(musicId, instrument, manifest).length > 0)
 }
 
 function isInstrumentKey(value: unknown): value is InstrumentKey {
@@ -416,7 +478,7 @@ function formatTime(seconds: number) {
 
 function chooseFallbackInstrument(musicId: number, manifest: DtxChartManifest) {
   const requestedInstrument = getFirstQueryValue(route.query.instrument)
-  const availableInstruments = getAvailableDtxInstruments(musicId, manifest)
+  const availableInstruments = getSelectableDtxInstruments(musicId, manifest)
 
   if (
     isInstrumentKey(requestedInstrument)
@@ -432,7 +494,7 @@ function chooseFallbackInstrument(musicId: number, manifest: DtxChartManifest) {
 
 function chooseFallbackLevel(musicId: number, instrumentKey: InstrumentKey, manifest = chartManifest.value) {
   const requestedLevel = getFirstQueryValue(route.query.level)
-  const availableLevels = manifest ? getAvailableDtxLevels(musicId, instrumentKey, manifest) : []
+  const availableLevels = manifest ? getSelectableDtxLevels(musicId, instrumentKey, manifest) : []
 
   if (
     isLevelKey(requestedLevel)
@@ -468,15 +530,112 @@ async function normalizeRouteSelection(musicId: number, manifest: DtxChartManife
   return { instrument, level }
 }
 
+function clearPlaybackNoticeTimer() {
+  if (playbackNoticeTimer !== null) {
+    window.clearTimeout(playbackNoticeTimer)
+    playbackNoticeTimer = null
+  }
+}
+
+function showPlaybackNotice(message: string) {
+  clearPlaybackNoticeTimer()
+  playbackNotice.value = message
+  playbackNoticeTimer = window.setTimeout(() => {
+    playbackNotice.value = ''
+    playbackNoticeTimer = null
+  }, 2400)
+}
+
+function releaseLoadedChartAudio() {
+  if (loadedChartAudio) {
+    loadedChartAudio.element.removeEventListener('ended', handleChartAudioEnded)
+    loadedChartAudio.element.removeEventListener('error', handleChartAudioError)
+    loadedChartAudio.destroy()
+    loadedChartAudio = null
+  }
+
+  audioDurationSeconds.value = 0
+}
+
+function handleChartAudioEnded() {
+  setPlaybackTime(timelineDurationSeconds.value)
+  stopPlayback()
+}
+
+function handleChartAudioError() {
+  if (audioPlaybackPending.value) {
+    return
+  }
+
+  const shouldResume = playing.value
+  const currentTime = loadedChartAudio?.element.currentTime ?? playbackTimeSeconds.value
+
+  stopPlayback()
+  resumeAfterProgressSeek = false
+  resumeAfterChartSeek = false
+  releaseLoadedChartAudio()
+  audioTrackEnabled.value = false
+  setPlaybackTime(currentTime)
+  showPlaybackNotice('音频播放失败，已切换为无声播放')
+
+  if (shouldResume) {
+    void startPlayback()
+  }
+}
+
+async function prepareChartAudio(currentPreview: LoadedDtxChartPreview, sequence: number) {
+  const audioUrl = currentPreview.chart.audioUrl
+
+  if (!audioUrl) {
+    return
+  }
+
+  const currentAudioSequence = ++audioLoadSequence
+  audioLoading.value = true
+
+  try {
+    const loadedAudio = await loadChartAudio(audioUrl)
+
+    if (
+      sequence !== loadSequence
+      || currentAudioSequence !== audioLoadSequence
+      || !audioTrackEnabled.value
+    ) {
+      loadedAudio.destroy()
+      return
+    }
+
+    loadedChartAudio = loadedAudio
+    audioDurationSeconds.value = loadedAudio.duration
+    loadedAudio.element.addEventListener('ended', handleChartAudioEnded)
+    loadedAudio.element.addEventListener('error', handleChartAudioError)
+    seekViewerTime(playbackTimeSeconds.value)
+  } catch {
+    if (sequence === loadSequence && currentAudioSequence === audioLoadSequence) {
+      audioTrackEnabled.value = false
+      showPlaybackNotice('音频加载失败，已切换为无声播放')
+    }
+  } finally {
+    if (sequence === loadSequence && currentAudioSequence === audioLoadSequence) {
+      audioLoading.value = false
+    }
+  }
+}
+
 async function loadCurrentChart() {
   const currentSequence = ++loadSequence
   const musicId = getRouteMusicId()
   const previousPreview = preview.value
   const previousInstrument = selectedInstrumentKey.value
   const previousLevel = selectedLevelKey.value
-  const previousProgress = playbackProgress.value
+  const previousPlaybackTime = playbackTimeSeconds.value
 
   stopPlayback()
+  resumeAfterProgressSeek = false
+  resumeAfterChartSeek = false
+  audioLoadSequence += 1
+  releaseLoadedChartAudio()
+  audioLoading.value = false
   loading.value = true
   errorMessage.value = ''
   preview.value = null
@@ -508,7 +667,7 @@ async function loadCurrentChart() {
 
     chartManifest.value = manifest
 
-    if (!hasLoadedDtxChartSet(musicId, manifest)) {
+    if (getSelectableDtxInstruments(musicId, manifest).length === 0) {
       throw new Error('暂未收录这首歌的谱面预览')
     }
 
@@ -524,11 +683,6 @@ async function loadCurrentChart() {
     selectedBarsPerColumn.value = resolveRouteBarsPerColumn()
     selectedChartMode.value = resolveRouteChartMode()
     reverseEnabled.value = resolveRouteReverse(selection.instrument)
-    playbackProgress.value = previousPreview?.chart.musicId === musicId
-      && previousInstrument === selection.instrument
-      && previousLevel === selection.level
-      ? previousProgress
-      : 0
     const loadedPreview = await loadDtxChartPreview(
       musicId,
       selection.instrument,
@@ -544,7 +698,20 @@ async function loadCurrentChart() {
     }
 
     preview.value = loadedPreview
+    if (!loadedPreview.chart.audioUrl) {
+      audioTrackEnabled.value = false
+    }
+    setPlaybackTime(
+      previousPreview?.chart.musicId === musicId
+        && previousInstrument === selection.instrument
+        && previousLevel === selection.level
+        ? previousPlaybackTime
+        : 0,
+    )
     resetStaticViewport()
+    if (audioTrackEnabled.value) {
+      void prepareChartAudio(loadedPreview, currentSequence)
+    }
   } catch (error) {
     if (currentSequence !== loadSequence) {
       return
@@ -586,13 +753,13 @@ function updateSelection(instrument: InstrumentKey, level = selectedLevelKey.val
   }
 
   const manifest = chartManifest.value
-  const availableInstruments = manifest ? getAvailableDtxInstruments(musicId, manifest) : []
+  const availableInstruments = manifest ? getSelectableDtxInstruments(musicId, manifest) : []
 
   if (!availableInstruments.includes(instrument)) {
     return
   }
 
-  const availableLevels = manifest ? getAvailableDtxLevels(musicId, instrument, manifest) : []
+  const availableLevels = manifest ? getSelectableDtxLevels(musicId, instrument, manifest) : []
   const nextLevel = availableLevels.includes(level)
     ? level
     : chooseFallbackLevel(musicId, instrument, manifest)
@@ -1012,17 +1179,62 @@ function updateDynamicChartEnabled(enabled: boolean) {
   chartRenderMode.value = 'realtime'
 }
 
-function setViewerProgress(progress: number) {
-  playbackProgress.value = Math.min(1, Math.max(0, progress))
+async function updateAudioTrackEnabled(enabled: boolean) {
+  const currentPreview = preview.value
+
+  if (
+    enabled === audioTrackEnabled.value
+    || audioLoading.value
+    || (enabled && !currentPreview?.chart.audioUrl)
+  ) {
+    return
+  }
+
+  const shouldResume = playing.value
+  const currentTime = loadedChartAudio?.element.currentTime ?? playbackTimeSeconds.value
+  const currentSequence = loadSequence
+
+  stopPlayback()
+  audioLoadSequence += 1
+  audioLoading.value = false
+  releaseLoadedChartAudio()
+  audioTrackEnabled.value = enabled
+  setPlaybackTime(currentTime)
+
+  if (enabled && currentPreview) {
+    await prepareChartAudio(currentPreview, currentSequence)
+  }
+
+  if (shouldResume && currentSequence === loadSequence) {
+    void startPlayback()
+  }
+}
+
+function setPlaybackTime(time: number) {
+  const duration = timelineDurationSeconds.value
+  playbackTimeSeconds.value = duration > 0
+    ? Math.min(duration, Math.max(0, time))
+    : 0
+}
+
+function seekViewerTime(time: number) {
+  setPlaybackTime(time)
+
+  if (loadedChartAudio) {
+    loadedChartAudio.element.currentTime = Math.min(
+      loadedChartAudio.duration,
+      playbackTimeSeconds.value,
+    )
+  }
+
+  if (playing.value && !loadedChartAudio) {
+    playbackStartedAt = performance.now()
+    playbackStartedTime = playbackTimeSeconds.value
+  }
 }
 
 function seekViewerProgress(progress: number) {
-  setViewerProgress(progress)
-
-  if (playing.value) {
-    playbackStartedAt = performance.now()
-    playbackStartedProgress = playbackProgress.value
-  }
+  seekViewerTime(timelineDurationSeconds.value * Math.min(1, Math.max(0, progress)))
 }
 
 function getChartPixelsPerSecond() {
@@ -1042,15 +1254,13 @@ function getChartPixelsPerSecond() {
   return Math.max(1, currentPreview.drawingConfig.scale * REALTIME_BASE_PIXELS_PER_SECOND * zoom)
 }
 
-function seekViewerByPixelDelta(deltaY: number, startProgress = playbackProgress.value) {
-  const duration = preview.value?.dtxJson.songInfo.songDuration ?? 0
-
-  if (duration <= 0) {
+function seekViewerByPixelDelta(deltaY: number, startTime = playbackTimeSeconds.value) {
+  if (timelineDurationSeconds.value <= 0) {
     return
   }
 
   const direction = realtimeReverse.value ? 1 : -1
-  seekViewerProgress(startProgress + direction * deltaY / (duration * getChartPixelsPerSecond()))
+  seekViewerTime(startTime + direction * deltaY / getChartPixelsPerSecond())
 }
 
 function normalizeWheelDeltaY(event: WheelEvent) {
@@ -1076,10 +1286,16 @@ function handleChartPointerDown(event: PointerEvent) {
   }
 
   event.preventDefault()
+  resumeAfterChartSeek = playing.value
+
+  if (resumeAfterChartSeek) {
+    stopPlayback()
+  }
+
   dynamicDragging.value = true
   activeChartPointerId = event.pointerId
   chartDragStartY = event.clientY
-  chartDragStartProgress = playbackProgress.value
+  chartDragStartTime = playbackTimeSeconds.value
   viewerShellRef.value?.setPointerCapture(event.pointerId)
 }
 
@@ -1089,7 +1305,7 @@ function handleChartPointerMove(event: PointerEvent) {
   }
 
   event.preventDefault()
-  seekViewerByPixelDelta(event.clientY - chartDragStartY, chartDragStartProgress)
+  seekViewerByPixelDelta(event.clientY - chartDragStartY, chartDragStartTime)
 }
 
 function finishChartPointer(event: PointerEvent) {
@@ -1100,6 +1316,11 @@ function finishChartPointer(event: PointerEvent) {
   viewerShellRef.value?.releasePointerCapture(event.pointerId)
   activeChartPointerId = null
   dynamicDragging.value = false
+
+  if (resumeAfterChartSeek) {
+    resumeAfterChartSeek = false
+    void startPlayback()
+  }
 }
 
 function setProgressFromClientX(clientX: number) {
@@ -1119,6 +1340,12 @@ function setProgressFromClientX(clientX: number) {
 
 function handleProgressPointerDown(event: PointerEvent) {
   event.preventDefault()
+  resumeAfterProgressSeek = playing.value
+
+  if (resumeAfterProgressSeek) {
+    stopPlayback()
+  }
+
   activeProgressPointerId = event.pointerId
   progressShellRef.value?.setPointerCapture(event.pointerId)
   setProgressFromClientX(event.clientX)
@@ -1139,6 +1366,11 @@ function finishProgressPointer(event: PointerEvent) {
 
   progressShellRef.value?.releasePointerCapture(event.pointerId)
   activeProgressPointerId = null
+
+  if (resumeAfterProgressSeek) {
+    resumeAfterProgressSeek = false
+    void startPlayback()
+  }
 }
 
 function handleProgressKeydown(event: KeyboardEvent) {
@@ -1165,9 +1397,14 @@ function handleProgressKeydown(event: KeyboardEvent) {
 }
 
 function stopPlayback() {
+  if (loadedChartAudio) {
+    setPlaybackTime(loadedChartAudio.element.currentTime)
+    loadedChartAudio.element.pause()
+  }
+
   playing.value = false
   playbackStartedAt = 0
-  playbackStartedProgress = 0
+  playbackStartedTime = 0
   if (playbackFrame) {
     window.cancelAnimationFrame(playbackFrame)
     playbackFrame = 0
@@ -1179,24 +1416,37 @@ function runPlayback(timestamp: number) {
     return
   }
 
-  const duration = preview.value?.dtxJson.songInfo.songDuration ?? 0
+  const duration = timelineDurationSeconds.value
 
   if (!preview.value || duration <= 0) {
     stopPlayback()
     return
   }
 
+  if (loadedChartAudio) {
+    setPlaybackTime(loadedChartAudio.element.currentTime)
+
+    if (loadedChartAudio.element.ended || playbackTimeSeconds.value >= duration) {
+      setPlaybackTime(duration)
+      stopPlayback()
+      return
+    }
+
+    playbackFrame = window.requestAnimationFrame(runPlayback)
+    return
+  }
+
   if (!playbackStartedAt) {
     playbackStartedAt = timestamp
-    playbackStartedProgress = playbackProgress.value
+    playbackStartedTime = playbackTimeSeconds.value
   }
 
   const elapsedSeconds = Math.max(0, (timestamp - playbackStartedAt) / 1000)
-  const nextProgress = Math.min(1, playbackStartedProgress + elapsedSeconds / duration)
-  setViewerProgress(nextProgress)
+  const nextTime = Math.min(duration, playbackStartedTime + elapsedSeconds)
+  setPlaybackTime(nextTime)
 
-  if (nextProgress >= 1) {
-    setViewerProgress(1)
+  if (nextTime >= duration) {
+    setPlaybackTime(duration)
     stopPlayback()
     return
   }
@@ -1204,25 +1454,54 @@ function runPlayback(timestamp: number) {
   playbackFrame = window.requestAnimationFrame(runPlayback)
 }
 
-function togglePlayback() {
+async function startPlayback() {
   if (playbackDisabled.value) {
     return
   }
 
+  const duration = timelineDurationSeconds.value
+
+  if (duration <= 0) {
+    return
+  }
+
+  if (playbackTimeSeconds.value >= duration - 0.01) {
+    seekViewerTime(0)
+  }
+
+  settingsPanelOpen.value = false
+  audioPlaybackPending.value = true
+
+  if (loadedChartAudio) {
+    try {
+      loadedChartAudio.element.currentTime = Math.min(
+        loadedChartAudio.duration,
+        playbackTimeSeconds.value,
+      )
+      await loadedChartAudio.element.play()
+    } catch {
+      const currentTime = playbackTimeSeconds.value
+      releaseLoadedChartAudio()
+      audioTrackEnabled.value = false
+      setPlaybackTime(currentTime)
+      showPlaybackNotice('音频播放失败，已切换为无声播放')
+    }
+  }
+
+  audioPlaybackPending.value = false
+  playing.value = true
+  playbackStartedAt = 0
+  playbackStartedTime = playbackTimeSeconds.value
+  playbackFrame = window.requestAnimationFrame(runPlayback)
+}
+
+function togglePlayback() {
   if (playing.value) {
     stopPlayback()
     return
   }
 
-  if (playbackProgress.value >= 0.999) {
-    setViewerProgress(0)
-  }
-
-  settingsPanelOpen.value = false
-  playing.value = true
-  playbackStartedAt = 0
-  playbackStartedProgress = playbackProgress.value
-  playbackFrame = window.requestAnimationFrame(runPlayback)
+  void startPlayback()
 }
 
 function closeSettingsPanel() {
@@ -1344,11 +1623,46 @@ watch(
   { immediate: true },
 )
 
-onBeforeUnmount(() => {
+function pausePlaybackForBackground() {
+  resumeAfterProgressSeek = false
+  resumeAfterChartSeek = false
   stopPlayback()
+}
+
+function handleDocumentVisibilityChange() {
+  if (document.hidden) {
+    pausePlaybackForBackground()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
+  void App.addListener('appStateChange', ({ isActive }) => {
+    if (!isActive) {
+      pausePlaybackForBackground()
+    }
+  }).then((listener) => {
+    if (viewUnmounted) {
+      void listener.remove()
+      return
+    }
+
+    appStateChangeListener = listener
+  }).catch(() => {})
+})
+
+onBeforeUnmount(() => {
+  viewUnmounted = true
+  loadSequence += 1
+  stopPlayback()
+  releaseLoadedChartAudio()
   stopRafDebugMonitor()
   clearStaticZoomCommit()
+  clearPlaybackNoticeTimer()
   resetStaticGesture()
+  document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
+  void appStateChangeListener?.remove()
+  appStateChangeListener = null
   viewerResizeObserver?.disconnect()
   viewerResizeObserver = null
 })
@@ -1415,7 +1729,7 @@ onBeforeUnmount(() => {
           v-else
           :drawing-config="preview.drawingConfig"
           :dtx-json="preview.dtxJson"
-          :progress="playbackProgress"
+          :progress="chartPlaybackProgress"
           :reverse="realtimeReverse"
         />
         <div
@@ -1469,10 +1783,21 @@ onBeforeUnmount(() => {
               :class="getLevelButtonClass(level)"
               type="button"
               :disabled="!level.available"
+              :title="level.hasAudio ? '支持音轨' : undefined"
               @click="updateSelection(selectedInstrumentKey, level.key)"
             >
               <span>{{ level.label }}</span>
               <small>{{ level.difficultyText }}</small>
+              <svg
+                v-if="level.hasAudio"
+                class="chart-preview__level-audio-icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path d="M11 5L6.5 9H3v6h3.5l4.5 4V5Z"></path>
+                <path d="M15 9a4 4 0 010 6"></path>
+                <path d="M18 6a8 8 0 010 12"></path>
+              </svg>
             </button>
           </div>
         </div>
@@ -1578,6 +1903,23 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="chart-preview__panel-section">
+            <span>播放音轨</span>
+            <button
+              class="chart-preview__reverse-toggle"
+              type="button"
+              role="switch"
+              :aria-checked="audioTrackEnabled"
+              :aria-busy="audioLoading"
+              :disabled="!audioTrackAvailable || audioLoading || audioPlaybackPending"
+              @click="updateAudioTrackEnabled(!audioTrackEnabled)"
+            >
+              <span class="chart-preview__reverse-toggle-track">
+                <span class="chart-preview__reverse-toggle-thumb"></span>
+              </span>
+            </button>
+          </div>
+
+          <div class="chart-preview__panel-section">
             <span>动态谱面</span>
             <button
               class="chart-preview__reverse-toggle"
@@ -1593,6 +1935,12 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </section>
+    </Transition>
+
+    <Transition name="chart-preview-notice">
+      <div v-if="playbackNotice" class="chart-preview__playback-notice" role="status">
+        {{ playbackNotice }}
+      </div>
     </Transition>
 
     <footer class="chart-preview__player" aria-label="谱面播放控制">
@@ -1623,12 +1971,14 @@ onBeforeUnmount(() => {
         <span class="chart-preview__time">{{ currentTimeLabel }} / {{ totalTimeLabel }}</span>
         <button
           class="chart-preview__play-button"
+          :class="{ 'chart-preview__play-button--loading': audioLoading }"
           type="button"
           :disabled="playbackDisabled"
-          :aria-label="playing ? '暂停自动滚动' : '播放自动滚动'"
+          :aria-label="audioLoading ? '正在加载音轨' : playing ? '暂停播放' : '播放谱面'"
           @click="togglePlayback"
         >
-          <img :src="playing ? pauseIconSrc : playIconSrc" alt="" aria-hidden="true" />
+          <span v-if="audioLoading" class="chart-preview__audio-spinner" aria-hidden="true"></span>
+          <img v-else :src="playing ? pauseIconSrc : playIconSrc" alt="" aria-hidden="true" />
         </button>
         <button
           class="chart-preview__menu-button"
@@ -1873,6 +2223,35 @@ onBeforeUnmount(() => {
   color: #ffffff;
 }
 
+.chart-preview__playback-notice {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--note-player-height) + 14px);
+  left: 16px;
+  z-index: 48;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  margin: 0 auto;
+  padding: 9px 13px;
+  border-radius: 6px;
+  background: rgba(35, 29, 48, 0.94);
+  color: #ffffff;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.chart-preview-notice-enter-active,
+.chart-preview-notice-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.chart-preview-notice-enter-from,
+.chart-preview-notice-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
 .chart-preview__player {
   position: fixed;
   right: 0;
@@ -1951,6 +2330,19 @@ onBeforeUnmount(() => {
 
 .chart-preview__play-button:disabled img {
   filter: grayscale(1);
+}
+
+.chart-preview__play-button--loading:disabled {
+  opacity: 1;
+}
+
+.chart-preview__audio-spinner {
+  width: 25px;
+  height: 25px;
+  border: 3px solid rgba(75, 59, 118, 0.2);
+  border-top-color: var(--note-purple);
+  border-radius: 50%;
+  animation: chartPreviewAudioSpin 0.7s linear infinite;
 }
 
 .chart-preview__menu-button img {
@@ -2048,13 +2440,13 @@ onBeforeUnmount(() => {
 }
 
 .chart-preview__panel-row--mode-dynamic {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 70px;
+  grid-template-columns: minmax(0, 1fr) 70px 70px;
   gap: 8px;
   align-items: end;
 }
 
 .chart-preview__panel-section--mode {
-  grid-column: span 2;
+  min-width: 0;
 }
 
 .chart-preview__panel-section--mode .chart-preview__panel-grid--two {
@@ -2088,6 +2480,7 @@ onBeforeUnmount(() => {
 }
 
 .chart-preview__panel-button {
+  position: relative;
   display: grid;
   gap: 2px;
   align-content: center;
@@ -2100,6 +2493,19 @@ onBeforeUnmount(() => {
   font-family: var(--font-figma-title);
   font-size: 12px;
   font-weight: 700;
+}
+
+.chart-preview__level-audio-icon {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .chart-preview__panel-button small {
@@ -2234,6 +2640,12 @@ onBeforeUnmount(() => {
 
 .chart-preview__reverse-toggle:disabled .chart-preview__reverse-toggle-track {
   background: rgba(143, 136, 160, 0.36);
+}
+
+@keyframes chartPreviewAudioSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .chart-preview-scrim-enter-active,

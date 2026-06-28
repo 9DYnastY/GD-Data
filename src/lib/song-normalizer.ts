@@ -6,7 +6,9 @@ import type {
   RawSong,
   SongViewModel,
 } from '../types/song'
+import type { MdbIndex, MdbSongRecord } from '../types/mdb'
 import { createCoverCacheKey } from './cover-cache'
+import { resolveMdbCoverUrl } from './mdb-assets'
 
 const INSTRUMENT_ORDER: Array<{ key: InstrumentKey; label: string }> = [
   { key: 'guitar', label: 'Guitar' },
@@ -178,7 +180,7 @@ function createInstrumentDifficulties(rawSong: RawSong): InstrumentDifficulty[] 
 }
 
 function createBpmDisplay(rawSong: RawSong): { primary: number | null; secondary: number | null; label: string } {
-  const primary = rawSong.bpm && rawSong.bpm > 0 ? rawSong.bpm : rawSong.remy_bpm ?? null
+  const primary = rawSong.bpm && rawSong.bpm > 0 ? rawSong.bpm : null
   const secondary =
     rawSong.bpm2 && rawSong.bpm2 > 0 && rawSong.bpm2 !== primary ? rawSong.bpm2 : null
 
@@ -193,14 +195,18 @@ function createBpmDisplay(rawSong: RawSong): { primary: number | null; secondary
   }
 }
 
-function createSearchText(rawSong: RawSong, title: string, artist: string): string {
+function createSearchText(
+  rawSong: RawSong,
+  mdbSong: MdbSongRecord | null,
+  title: string,
+  artist: string,
+): string {
   return [
     title,
     artist,
     rawSong.title_name ?? '',
-    rawSong.remy_title ?? '',
     rawSong.title_ascii ?? '',
-    rawSong.remy_artist ?? '',
+    mdbSong?.remy_artist ?? '',
     rawSong.artist_title_ascii ?? '',
     String(rawSong.music_id),
   ]
@@ -212,10 +218,15 @@ function createImageFallback(title: string): string {
   return title.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'GD'
 }
 
-export function normalizeSong(rawSong: RawSong, index: number): SongViewModel {
-  const displayTitle = normalizeText(rawSong.title_name, normalizeText(rawSong.remy_title, 'Untitled'))
+export function normalizeSong(
+  rawSong: RawSong,
+  index: number,
+  mdbIndex: MdbIndex | null,
+  mdbSong: MdbSongRecord | null,
+): SongViewModel {
+  const displayTitle = normalizeText(rawSong.title_name, normalizeText(rawSong.title_ascii, 'Untitled'))
   const displayArtist = normalizeText(
-    rawSong.remy_artist,
+    mdbSong?.remy_artist,
     normalizeText(rawSong.artist_title_ascii, 'Artist TBD'),
   )
   const version = createVersionLabel(rawSong.first_ver ?? null)
@@ -234,6 +245,7 @@ export function normalizeSong(rawSong: RawSong, index: number): SongViewModel {
     normalizeBoolean(rawSong.is_remaster) ? 'Remaster' : null,
     rawSong.xg_b_session ? 'Session' : null,
   ].filter((entry): entry is string => Boolean(entry))
+  const coverUrl = mdbIndex ? resolveMdbCoverUrl(mdbIndex, mdbSong) : null
 
   return {
     index,
@@ -252,9 +264,9 @@ export function normalizeSong(rawSong: RawSong, index: number): SongViewModel {
     bpmPrimary: bpm.primary,
     bpmSecondary: bpm.secondary,
     bpmDisplay: bpm.label,
-    lengthLabel: normalizeText(rawSong.remy_length, 'Length TBD'),
-    heroImageUrl: rawSong.remy_imageUrl ?? null,
-    heroImageCacheKey: createCoverCacheKey(rawSong.music_id, rawSong.remy_imageUrl ?? null),
+    lengthLabel: normalizeText(mdbSong?.remy_length, 'Length TBD'),
+    heroImageUrl: coverUrl,
+    heroImageCacheKey: createCoverCacheKey(rawSong.music_id, coverUrl),
     imageFallback: createImageFallback(displayTitle),
     tags,
     instruments,
@@ -265,13 +277,13 @@ export function normalizeSong(rawSong: RawSong, index: number): SongViewModel {
 
       return currentMax === null ? instrument.maxDifficulty : Math.max(currentMax, instrument.maxDifficulty)
     }, null),
-    links: { remyUrl: rawSong.remy_url ?? null },
+    links: { remyUrl: mdbSong?.remy_url ?? null },
     metadata: {
       isClassic,
       isDeleted,
       xgDiffList: [...(rawSong.xg_diff_list ?? [])],
     },
-    searchText: createSearchText(rawSong, displayTitle, displayArtist),
+    searchText: createSearchText(rawSong, mdbSong, displayTitle, displayArtist),
     sortKeys: {
       defaultOrder: index,
       titleAsciiOrder: rawSong.order_ascii ?? index,

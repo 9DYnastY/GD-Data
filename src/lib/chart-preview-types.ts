@@ -107,6 +107,7 @@ export interface DtxChartFile {
   instrument: InstrumentKey
   level: LevelKey
   url: string
+  audioUrl: string | null
 }
 
 export interface LoadedDtxChartPreview {
