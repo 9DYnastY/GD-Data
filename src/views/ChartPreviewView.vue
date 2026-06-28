@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { App } from '@capacitor/app'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DtxChartCanvas from '../components/DtxChartCanvas.vue'
 import DtxRealtimeCanvas from '../components/DtxRealtimeCanvas.vue'
@@ -15,11 +15,18 @@ import {
 } from '../lib/chart-preview-manifest'
 import { loadChartAudio } from '../lib/chart-preview-audio'
 import { loadDtxChartPreview } from '../lib/chart-preview-loader'
+import { loadBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
 import { loadSongByMusicId } from '../lib/song-catalog'
 import { useDebugMode } from '../lib/debug-mode'
-import { REALTIME_BASE_PIXELS_PER_SECOND } from '../lib/chart-preview-realtime-renderer'
+import { exportElementAsImage, resolveImageSourceForExport } from '../lib/b50-export'
+import {
+  REALTIME_BASE_PIXELS_PER_SECOND,
+  prepareDtxRealtimeData,
+  renderDtxAnnotationExportCanvas,
+} from '../lib/chart-preview-realtime-renderer'
 import { getFullBodyFrameWidth } from '../lib/chart-preview-positioner'
 import type { LoadedChartAudio } from '../lib/chart-preview-audio'
+import type { DtxHandAnnotation } from '../lib/chart-preview-realtime-renderer'
 import type { DtxChartMode, LoadedDtxChartPreview } from '../lib/chart-preview-types'
 import type { DtxChartManifest } from '../lib/chart-preview-manifest'
 import type { InstrumentKey, LevelKey, SongViewModel } from '../types/song'
@@ -89,9 +96,18 @@ const selectedChartMode = ref<DtxChartMode>('XG/Gitadora')
 const reverseEnabled = ref(false)
 const viewerShellRef = ref<HTMLElement | null>(null)
 const progressShellRef = ref<HTMLElement | null>(null)
+const annotationExportStageRef = ref<HTMLElement | null>(null)
+const annotationExportCanvasRef = ref<HTMLCanvasElement | null>(null)
+const annotationExportCoverSrc = ref<string | null>(null)
 const viewerShellSize = ref({ width: 0, height: 0 })
 const settingsPanelOpen = ref(false)
 const chartRenderMode = ref<ChartRenderMode>('realtime')
+const annotationModeEnabled = ref(false)
+const showAnnotations = ref(false)
+const annotationSelectedNoteKey = ref<string | null>(null)
+const chartAnnotations = ref<Record<string, DtxHandAnnotation>>({})
+const annotationBookmarks = ref<number[]>([])
+const annotationExporting = ref(false)
 const dynamicDragging = ref(false)
 const staticDragging = ref(false)
 const staticZoom = ref(1)
@@ -166,7 +182,7 @@ const CHART_PREVIEW_REVERSE_STORAGE_KEY = 'gddata.chartPreview.reverse'
 const PROGRESS_RANGE_MAX = 1000
 const PROGRESS_EDGE_INSET_PX = 20
 const RAF_DEBUG_SMOOTHING = 0.12
-
+const ANNOTATION_EXPORT_CANVAS_WIDTH = 402
 const instrumentOptions = computed<InstrumentOption[]>(() => {
   const musicId = getRouteMusicId()
   const availableInstruments = musicId !== null
@@ -227,6 +243,34 @@ const progressThumbLeft = computed(() => {
 })
 const totalTimeLabel = computed(() => formatTime(timelineDurationSeconds.value))
 const currentTimeLabel = computed(() => formatTime(playbackTimeSeconds.value))
+const currentBarNumber = computed(() => {
+  const bars = preview.value?.dtxJson.bars ?? []
+
+  if (bars.length === 0) {
+    return 0
+  }
+
+  let currentBar = 0
+
+  for (let index = 0; index < bars.length; index += 1) {
+    if ((bars[index]?.startTimePos ?? 0) > playbackTimeSeconds.value) {
+      break
+    }
+
+    currentBar = index
+  }
+
+  return currentBar
+})
+const currentBarProgressLabel = computed(() => {
+  const bars = preview.value?.dtxJson.bars ?? []
+
+  if (bars.length === 0) {
+    return '--- / ---'
+  }
+
+  return `${formatBarNumber(currentBarNumber.value)} / ${formatBarNumber(bars.length - 1)}`
+})
 const canDecreaseSpeed = computed(() => selectedSpeed.value > SPEED_MIN)
 const canIncreaseSpeed = computed(() => selectedSpeed.value < SPEED_MAX)
 const canAdjustBarsPerColumn = computed(() => chartRenderMode.value === 'static')
@@ -253,10 +297,113 @@ const chartDragging = computed(() => {
 const dynamicChartEnabled = computed(() => {
   return chartRenderMode.value === 'realtime'
 })
+const annotationModeAvailable = computed(() => {
+  return selectedInstrumentKey.value === 'drum' && chartRenderMode.value === 'realtime'
+})
+const annotationModeActive = computed(() => {
+  return annotationModeEnabled.value && annotationModeAvailable.value
+})
+const annotationDisplayActive = computed(() => {
+  return annotationModeActive.value || showAnnotations.value
+})
+const hasAnnotations = computed(() => Object.keys(chartAnnotations.value).length > 0)
+const annotationExportRange = computed(() => {
+  const [firstBookmark, secondBookmark] = annotationBookmarks.value
+
+  if (!firstBookmark || !secondBookmark) {
+    return null
+  }
+
+  return {
+    startTime: Math.min(firstBookmark, secondBookmark),
+    endTime: Math.max(firstBookmark, secondBookmark),
+  }
+})
+const annotationBookmarkMarkers = computed(() => {
+  if (!annotationModeActive.value) {
+    return []
+  }
+
+  return annotationBookmarks.value.map((bookmark, index) => {
+    const progress = Math.min(1, Math.max(0, bookmark / Math.max(1, timelineDurationSeconds.value)))
+    return {
+      index,
+      left: `calc(${PROGRESS_EDGE_INSET_PX}px + (100% - ${PROGRESS_EDGE_INSET_PX * 2}px) * ${progress})`,
+    }
+  })
+})
+const annotationBookmarkButtonLabel = computed(() => {
+  return annotationBookmarks.value.length === 1 ? '设置导出区间终点' : '设置导出区间起点'
+})
+const canExportAnnotations = computed(() => (
+  selectedInstrumentKey.value === 'drum'
+  && Boolean(preview.value)
+  && hasAnnotations.value
+  && Boolean(annotationExportRange.value)
+))
+const selectedAnnotationValue = computed(() => {
+  const noteKey = annotationSelectedNoteKey.value
+  return noteKey ? chartAnnotations.value[noteKey] ?? null : null
+})
+const annotationProgressSegments = computed(() => {
+  const bars = preview.value?.dtxJson.bars ?? []
+  const duration = timelineDurationSeconds.value
+
+  if (bars.length === 0 || duration <= 0) {
+    return []
+  }
+
+  const annotatedBars = new Set<number>()
+
+  Object.entries(chartAnnotations.value).forEach(([noteKey, value]) => {
+    if (value !== 'L' && value !== 'R') {
+      return
+    }
+
+    const barNumber = Number(noteKey.split(':', 1)[0])
+
+    if (Number.isInteger(barNumber) && barNumber >= 0 && barNumber < bars.length) {
+      annotatedBars.add(barNumber)
+    }
+  })
+
+  return [...annotatedBars].sort((a, b) => a - b).map((barNumber) => {
+    const bar = bars[barNumber]
+    const startTime = Math.max(0, Math.min(duration, bar?.startTimePos ?? 0))
+    const nextStartTime = bars[barNumber + 1]?.startTimePos
+    const endTime = Math.max(startTime, Math.min(
+      duration,
+      typeof nextStartTime === 'number'
+        ? nextStartTime
+        : startTime + (bar?.duration ?? 0),
+    ))
+
+    return {
+      barNumber,
+      left: `calc(${PROGRESS_EDGE_INSET_PX}px + (100% - ${PROGRESS_EDGE_INSET_PX * 2}px) * ${startTime / duration})`,
+      width: `calc((100% - ${PROGRESS_EDGE_INSET_PX * 2}px) * ${Math.max(0.0035, (endTime - startTime) / duration)})`,
+    }
+  })
+})
+const playerProgressLabel = computed(() => {
+  return annotationModeActive.value
+    ? currentBarProgressLabel.value
+    : `${currentTimeLabel.value} / ${totalTimeLabel.value}`
+})
+const annotationExportDifficultyText = computed(() => {
+  return levelOptions.value.find((level) => level.key === selectedLevelKey.value)?.difficultyText ?? '-.-'
+})
+const annotationExportAuthorName = loadBjmaniaSkillSnapshotCache()?.snapshot.gitadoraProfile.name?.trim() || '佚名'
+const annotationExportDateText = new Intl.DateTimeFormat('zh-CN', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+}).format(new Date())
 const audioTrackAvailable = computed(() => Boolean(preview.value?.chart.audioUrl))
 const playbackDisabled = computed(() => {
   return (
     chartRenderMode.value === 'static'
+    || annotationModeActive.value
     || !preview.value
     || audioLoading.value
     || audioPlaybackPending.value
@@ -405,6 +552,53 @@ function writeStoredReverse(enabled: boolean) {
   }
 }
 
+function getAnnotationStorageKey(currentPreview = preview.value) {
+  if (!currentPreview) {
+    return ''
+  }
+
+  return [
+    'gddata.chartPreview.annotations',
+    currentPreview.chart.musicId,
+    currentPreview.chart.instrument,
+    currentPreview.chart.level,
+    currentPreview.chart.url,
+  ].join(':')
+}
+
+function readStoredAnnotations(currentPreview: LoadedDtxChartPreview) {
+  const rawAnnotations = getPreferenceStorage()?.getItem(getAnnotationStorageKey(currentPreview))
+
+  if (!rawAnnotations) {
+    return {}
+  }
+
+  try {
+    const parsed = JSON.parse(rawAnnotations) as Record<string, DtxHandAnnotation>
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, DtxHandAnnotation] => {
+        return entry[1] === 'L' || entry[1] === 'R'
+      }),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function writeStoredAnnotations() {
+  const storageKey = getAnnotationStorageKey()
+
+  if (!storageKey) {
+    return
+  }
+
+  try {
+    getPreferenceStorage()?.setItem(storageKey, JSON.stringify(chartAnnotations.value))
+  } catch {
+    // Preference persistence is best effort.
+  }
+}
+
 function mapLegacyRenderScaleToGameSpeed(scale: number) {
   return normalizeGameSpeed(scale * 2 + 0.5)
 }
@@ -474,6 +668,10 @@ function formatTime(seconds: number) {
   const minutes = Math.floor(safeSeconds / 60)
   const remainingSeconds = safeSeconds % 60
   return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
+}
+
+function formatBarNumber(value: number) {
+  return String(Math.max(0, value)).padStart(3, '0')
 }
 
 function chooseFallbackInstrument(musicId: number, manifest: DtxChartManifest) {
@@ -698,6 +896,21 @@ async function loadCurrentChart() {
     }
 
     preview.value = loadedPreview
+    chartAnnotations.value = readStoredAnnotations(loadedPreview)
+    annotationSelectedNoteKey.value = null
+
+    if (
+      previousPreview?.chart.musicId !== musicId
+      || previousInstrument !== selection.instrument
+      || previousLevel !== selection.level
+    ) {
+      annotationBookmarks.value = []
+    }
+
+    if (selection.instrument !== 'drum') {
+      annotationModeEnabled.value = false
+    }
+
     if (!loadedPreview.chart.audioUrl) {
       audioTrackEnabled.value = false
     }
@@ -1169,6 +1382,8 @@ function updateDynamicChartEnabled(enabled: boolean) {
 
   if (!enabled) {
     stopPlayback()
+    annotationModeEnabled.value = false
+    annotationSelectedNoteKey.value = null
     chartRenderMode.value = 'static'
     resetStaticViewport()
     return
@@ -1177,6 +1392,117 @@ function updateDynamicChartEnabled(enabled: boolean) {
   clearStaticZoomCommit()
   resetStaticGesture()
   chartRenderMode.value = 'realtime'
+}
+
+function updateAnnotationMode(enabled: boolean) {
+  if (enabled === annotationModeEnabled.value) {
+    return
+  }
+
+  if (enabled && !annotationModeAvailable.value) {
+    showPlaybackNotice('批注模式仅支持 Drum 动态谱面')
+    return
+  }
+
+  stopPlayback()
+  annotationModeEnabled.value = enabled
+  annotationSelectedNoteKey.value = null
+}
+
+function handleAnnotationSelectNote(noteKey: string) {
+  if (!annotationModeActive.value) {
+    return
+  }
+
+  annotationSelectedNoteKey.value = noteKey
+}
+
+function setSelectedAnnotation(value: DtxHandAnnotation) {
+  const noteKey = annotationSelectedNoteKey.value
+
+  if (!noteKey) {
+    return
+  }
+
+  chartAnnotations.value = {
+    ...chartAnnotations.value,
+    [noteKey]: value,
+  }
+  writeStoredAnnotations()
+}
+
+function clearSelectedAnnotation() {
+  const noteKey = annotationSelectedNoteKey.value
+
+  if (!noteKey || !chartAnnotations.value[noteKey]) {
+    return
+  }
+
+  const nextAnnotations = { ...chartAnnotations.value }
+  Reflect.deleteProperty(nextAnnotations, noteKey)
+  chartAnnotations.value = nextAnnotations
+  writeStoredAnnotations()
+}
+
+function setAnnotationBookmark() {
+  if (!annotationModeActive.value) {
+    return
+  }
+
+  const settingOutPoint = annotationBookmarks.value.length === 1
+  const bookmark = Math.min(dtxDurationSeconds.value, Math.max(0, playbackTimeSeconds.value))
+  annotationBookmarks.value = annotationBookmarks.value.length === 1
+    ? [...annotationBookmarks.value, bookmark]
+    : [bookmark]
+  showPlaybackNotice(settingOutPoint ? '已标记出点' : '已标记入点')
+}
+
+async function exportAnnotationsImage() {
+  const currentPreview = preview.value
+  const exportStage = annotationExportStageRef.value
+  const exportCanvas = annotationExportCanvasRef.value
+  const range = annotationExportRange.value
+
+  if (annotationExporting.value || !currentPreview || !exportStage || !exportCanvas || !range) {
+    return
+  }
+
+  annotationExporting.value = true
+
+  try {
+    const { startTime, endTime } = range
+    annotationExportCoverSrc.value = await resolveImageSourceForExport(
+      song.value?.heroImageUrl ?? null,
+      song.value?.heroImageCacheKey ?? undefined,
+    )
+
+    await nextTick()
+
+    renderDtxAnnotationExportCanvas(
+      exportCanvas,
+      prepareDtxRealtimeData(currentPreview.dtxJson),
+      currentPreview.drawingConfig,
+      {
+        annotations: chartAnnotations.value,
+        endTime,
+        reverse: realtimeReverse.value,
+        startTime,
+        width: ANNOTATION_EXPORT_CANVAS_WIDTH,
+      },
+    )
+
+    const result = await exportElementAsImage(
+      exportStage,
+      `chart_annotation_${currentPreview.chart.musicId}_${selectedLevelKey.value}_${Math.round(startTime * 1000)}-${Math.round(endTime * 1000)}`,
+      { format: 'png', scale: 2 },
+    )
+
+    showPlaybackNotice(result.uri ? '批注截图已保存' : '批注截图已下载')
+  } catch {
+    showPlaybackNotice('批注截图导出失败')
+  } finally {
+    annotationExporting.value = false
+  }
 }
 
 async function updateAudioTrackEnabled(enabled: boolean) {
@@ -1727,10 +2053,15 @@ onBeforeUnmount(() => {
         </div>
         <DtxRealtimeCanvas
           v-else
+          :annotation-mode="annotationModeActive"
+          :annotations="annotationDisplayActive ? chartAnnotations : undefined"
+          :bookmark-times="annotationBookmarks"
           :drawing-config="preview.drawingConfig"
           :dtx-json="preview.dtxJson"
           :progress="chartPlaybackProgress"
           :reverse="realtimeReverse"
+          :selected-note-key="annotationSelectedNoteKey"
+          @select-note="handleAnnotationSelectNote"
         />
         <div
           v-if="debugModeEnabled"
@@ -1934,6 +2265,55 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+
+        <div class="chart-preview__panel-section">
+          <span>批注模式</span>
+          <button
+            class="chart-preview__reverse-toggle chart-preview__reverse-toggle--inline"
+            type="button"
+            role="switch"
+            :aria-checked="annotationModeActive"
+            :disabled="!annotationModeAvailable"
+            @click="updateAnnotationMode(!annotationModeActive)"
+          >
+            <span class="chart-preview__reverse-toggle-track">
+              <span class="chart-preview__reverse-toggle-thumb"></span>
+            </span>
+          </button>
+        </div>
+
+        <div class="chart-preview__panel-section">
+          <span>显示批注</span>
+          <button
+            class="chart-preview__reverse-toggle chart-preview__reverse-toggle--inline"
+            type="button"
+            role="switch"
+            :aria-checked="annotationDisplayActive"
+            :disabled="selectedInstrumentKey !== 'drum'"
+            @click="showAnnotations = annotationModeActive ? true : !showAnnotations"
+          >
+            <span class="chart-preview__reverse-toggle-track">
+              <span class="chart-preview__reverse-toggle-thumb"></span>
+            </span>
+          </button>
+        </div>
+
+        <div class="chart-preview__panel-section">
+          <span>导出批注</span>
+          <button
+            class="chart-preview__export-annotation-button"
+            type="button"
+            :disabled="!canExportAnnotations || annotationExporting"
+            aria-label="导出批注截图"
+            @click="exportAnnotationsImage"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3V15"></path>
+              <path d="M7 10L12 15L17 10"></path>
+              <path d="M5 20H19"></path>
+            </svg>
+          </button>
+        </div>
       </section>
     </Transition>
 
@@ -1959,7 +2339,20 @@ onBeforeUnmount(() => {
         @pointermove="handleProgressPointerMove"
         @pointerup="finishProgressPointer"
       >
-        <span class="chart-preview__progress-track" aria-hidden="true"></span>
+        <span class="chart-preview__progress-track" aria-hidden="true">
+          <span
+            v-for="segment in annotationProgressSegments"
+            :key="segment.barNumber"
+            class="chart-preview__progress-annotation"
+            :style="{ left: segment.left, width: segment.width }"
+          ></span>
+          <span
+            v-for="marker in annotationBookmarkMarkers"
+            :key="marker.index"
+            class="chart-preview__progress-bookmark"
+            :style="{ left: marker.left }"
+          ></span>
+        </span>
         <span
           class="chart-preview__progress-thumb"
           :style="{ left: progressThumbLeft }"
@@ -1967,9 +2360,54 @@ onBeforeUnmount(() => {
         ></span>
       </div>
 
-      <div class="chart-preview__player-inner">
-        <span class="chart-preview__time">{{ currentTimeLabel }} / {{ totalTimeLabel }}</span>
+      <div
+        class="chart-preview__player-inner"
+        :class="{ 'chart-preview__player-inner--annotation': annotationModeActive }"
+      >
+        <span class="chart-preview__time">{{ playerProgressLabel }}</span>
+        <div v-if="annotationModeActive" class="chart-preview__annotation-controls">
+          <button
+            class="chart-preview__annotation-button chart-preview__annotation-button--bookmark"
+            type="button"
+            :aria-label="annotationBookmarkButtonLabel"
+            @click="setAnnotationBookmark"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 4H18V21L12 17L6 21V4Z"></path>
+            </svg>
+          </button>
+          <button
+            class="chart-preview__annotation-button chart-preview__annotation-button--left"
+            type="button"
+            :class="{ 'chart-preview__annotation-button--active': selectedAnnotationValue === 'L' }"
+            :disabled="!annotationSelectedNoteKey"
+            aria-label="标记左手"
+            @click="setSelectedAnnotation('L')"
+          >
+            L
+          </button>
+          <button
+            class="chart-preview__annotation-button chart-preview__annotation-button--right"
+            type="button"
+            :class="{ 'chart-preview__annotation-button--active': selectedAnnotationValue === 'R' }"
+            :disabled="!annotationSelectedNoteKey"
+            aria-label="标记右手"
+            @click="setSelectedAnnotation('R')"
+          >
+            R
+          </button>
+          <button
+            class="chart-preview__annotation-button chart-preview__annotation-button--clear"
+            type="button"
+            :disabled="!selectedAnnotationValue"
+            aria-label="清除手序标记"
+            @click="clearSelectedAnnotation"
+          >
+            ×
+          </button>
+        </div>
         <button
+          v-else
           class="chart-preview__play-button"
           :class="{ 'chart-preview__play-button--loading': audioLoading }"
           type="button"
@@ -1991,6 +2429,41 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </footer>
+
+    <div class="chart-preview__annotation-export-stage" aria-hidden="true">
+      <div ref="annotationExportStageRef" class="chart-preview__annotation-export-card">
+        <canvas ref="annotationExportCanvasRef" class="chart-preview__annotation-export-canvas"></canvas>
+        <header class="chart-preview__annotation-export-header">
+          <div class="chart-preview__annotation-export-copy">
+            <h1>{{ song?.displayTitle || '' }}</h1>
+            <div class="chart-preview__annotation-export-meta">
+              <span class="chart-preview__annotation-export-instrument">
+                {{ INSTRUMENT_LABELS[selectedInstrumentKey] }}
+              </span>
+              <span
+                class="chart-preview__annotation-export-difficulty"
+                :class="`chart-preview__annotation-export-difficulty--${selectedLevelKey}`"
+              >
+                {{ LEVEL_LABELS[selectedLevelKey] }}
+              </span>
+              <strong
+                class="chart-preview__annotation-export-level"
+                :class="`chart-preview__annotation-export-level--${selectedLevelKey}`"
+              >
+                {{ annotationExportDifficultyText }}
+              </strong>
+            </div>
+            <p class="chart-preview__annotation-export-author">
+              由 <strong>{{ annotationExportAuthorName }}</strong> 制作
+              <time>{{ annotationExportDateText }}</time>
+            </p>
+          </div>
+          <div class="chart-preview__annotation-export-cover">
+            <img v-if="annotationExportCoverSrc" :src="annotationExportCoverSrc" alt="" />
+          </div>
+        </header>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -2286,11 +2759,71 @@ onBeforeUnmount(() => {
   padding: 0 25px var(--note-safe-bottom);
 }
 
+.chart-preview__player-inner--annotation {
+  grid-template-columns: 1fr 184px 1fr;
+}
+
 .chart-preview__time {
   color: #27213d;
   font-family: var(--font-figma-title);
   font-size: 14px;
   font-weight: 400;
+  white-space: nowrap;
+}
+
+.chart-preview__annotation-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  transform: translateX(10px);
+}
+
+.chart-preview__annotation-button {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  padding: 0;
+  border: 2px solid rgba(75, 59, 118, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--note-purple);
+  font-family: var(--font-figma-title);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.chart-preview__annotation-button--left.chart-preview__annotation-button--active {
+  border-color: #5d74ff;
+  background: #5d74ff;
+  color: #ffffff;
+}
+
+.chart-preview__annotation-button--right.chart-preview__annotation-button--active {
+  border-color: #ff5f9b;
+  background: #ff5f9b;
+  color: #ffffff;
+}
+
+.chart-preview__annotation-button--clear {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.chart-preview__annotation-button--bookmark svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.chart-preview__annotation-button:disabled {
+  cursor: default;
+  opacity: 0.36;
 }
 
 .chart-preview__play-button,
@@ -2368,9 +2901,27 @@ onBeforeUnmount(() => {
   top: 50%;
   right: 0;
   left: 0;
+  overflow: hidden;
   height: 14px;
   background: var(--note-purple);
   transform: translateY(-50%);
+}
+
+.chart-preview__progress-annotation {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: #f4d24d;
+}
+
+.chart-preview__progress-bookmark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 2px;
+  background: #e3374f;
+  transform: translateX(-50%);
 }
 
 .chart-preview__progress-thumb {
@@ -2413,6 +2964,7 @@ onBeforeUnmount(() => {
   left: 0;
   z-index: 34;
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   width: var(--note-player-width);
   margin: 0 auto;
@@ -2421,6 +2973,23 @@ onBeforeUnmount(() => {
   border-top-right-radius: 20px;
   background: #e8e1f6;
   box-shadow: 0 -14px 30px rgba(55, 43, 89, 0.22);
+}
+
+.chart-preview__settings-panel > .chart-preview__panel-row,
+.chart-preview__settings-panel > .chart-preview__panel-section {
+  grid-column: 1 / -1;
+}
+
+.chart-preview__settings-panel > .chart-preview__panel-section:nth-last-child(3) {
+  grid-column: 1;
+}
+
+.chart-preview__settings-panel > .chart-preview__panel-section:nth-last-child(2) {
+  grid-column: 2;
+}
+
+.chart-preview__settings-panel > .chart-preview__panel-section:last-child {
+  grid-column: 3;
 }
 
 .chart-preview__panel-section {
@@ -2603,6 +3172,10 @@ onBeforeUnmount(() => {
   color: var(--note-purple);
 }
 
+.chart-preview__reverse-toggle--inline {
+  transform: translateX(-6px);
+}
+
 .chart-preview__reverse-toggle-track {
   position: relative;
   width: 52px;
@@ -2640,6 +3213,164 @@ onBeforeUnmount(() => {
 
 .chart-preview__reverse-toggle:disabled .chart-preview__reverse-toggle-track {
   background: rgba(143, 136, 160, 0.36);
+}
+
+.chart-preview__export-annotation-button {
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid rgba(75, 59, 118, 0.24);
+  border-radius: 8px;
+  background: var(--note-purple);
+  color: #ffffff;
+}
+
+.chart-preview__export-annotation-button svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.chart-preview__export-annotation-button:disabled {
+  background: rgba(217, 211, 224, 0.44);
+  color: #9a93a9;
+}
+
+.chart-preview__annotation-export-stage {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.chart-preview__annotation-export-card {
+  width: 402px;
+  background: #f4f1f8;
+  color: #27213d;
+  font-family: var(--font-figma-title);
+}
+
+.chart-preview__annotation-export-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 16px;
+  align-items: stretch;
+  padding: 20px 20px 16px;
+}
+
+.chart-preview__annotation-export-copy {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.chart-preview__annotation-export-header h1,
+.chart-preview__annotation-export-header p {
+  margin: 0;
+}
+
+.chart-preview__annotation-export-header h1 {
+  color: var(--note-purple);
+  font-size: 24px;
+  line-height: 1.08;
+}
+
+.chart-preview__annotation-export-meta {
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  gap: 14px;
+  align-items: center;
+}
+
+.chart-preview__annotation-export-instrument,
+.chart-preview__annotation-export-difficulty,
+.chart-preview__annotation-export-level {
+  display: inline-grid;
+  min-height: 28px;
+  place-items: center;
+  padding: 0 10px 2px;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.chart-preview__annotation-export-instrument {
+  background: rgba(75, 59, 118, 0.12);
+  color: var(--note-purple);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.chart-preview__annotation-export-difficulty,
+.chart-preview__annotation-export-level {
+  border: 1px solid currentColor;
+}
+
+.chart-preview__annotation-export-difficulty--basic,
+.chart-preview__annotation-export-level--basic {
+  background: #e6f6eb;
+  color: #23894b;
+}
+
+.chart-preview__annotation-export-difficulty--advanced,
+.chart-preview__annotation-export-level--advanced {
+  background: #fff4d6;
+  color: #b97a00;
+}
+
+.chart-preview__annotation-export-difficulty--extreme,
+.chart-preview__annotation-export-level--extreme {
+  background: #fde7e9;
+  color: #cb3c4a;
+}
+
+.chart-preview__annotation-export-difficulty--master,
+.chart-preview__annotation-export-level--master {
+  background: #f0e5fa;
+  color: #7f43ad;
+}
+
+.chart-preview__annotation-export-author {
+  color: rgba(39, 33, 61, 0.7);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chart-preview__annotation-export-author strong {
+  color: var(--note-purple);
+  font-weight: 700;
+}
+
+.chart-preview__annotation-export-author time {
+  margin-left: 10px;
+}
+
+.chart-preview__annotation-export-cover {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgba(75, 59, 118, 0.1);
+}
+
+.chart-preview__annotation-export-cover img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chart-preview__annotation-export-canvas {
+  display: block;
+  width: 402px;
+  background: #000000;
 }
 
 @keyframes chartPreviewAudioSpin {

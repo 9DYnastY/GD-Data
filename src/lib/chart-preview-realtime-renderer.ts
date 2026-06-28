@@ -21,25 +21,56 @@ interface RealtimeBarLine {
 export interface DtxRealtimeData {
   bars: RealtimeBarLine[]
   bpmSegments: DtxBpmSegment[]
-  chips: DtxChip[]
+  chips: DtxRealtimeChip[]
   holdChips: DtxChip[]
   quarterBarLines: DtxLine[]
   songDuration: number
 }
 
+export type DtxHandAnnotation = 'L' | 'R'
+
+export interface DtxRealtimeChip extends DtxChip {
+  annotationEligible: boolean
+  noteKey: string
+}
+
+export interface DtxRealtimeNoteHitbox {
+  centerX: number
+  centerY: number
+  height: number
+  noteKey: string
+  width: number
+  x: number
+  y: number
+}
+
 interface RenderDtxRealtimeOptions {
+  annotationMode?: boolean
+  annotations?: Record<string, DtxHandAnnotation>
+  bookmarkTimes?: number[]
   progress: number
   reverse: boolean
+  selectedNoteKey?: string | null
   viewportHeight: number
   viewportWidth: number
 }
 
+interface RenderDtxAnnotationExportOptions {
+  annotations: Record<string, DtxHandAnnotation>
+  endTime: number
+  reverse: boolean
+  startTime: number
+  width: number
+}
+
 const DEFAULT_BACKGROUND_COLOR = '#1f1f1f'
 const END_LINE_COLOR = '#ff0000'
+const ANNOTATION_BOOKMARK_COLOR = '#e3374f'
 const LINE_OVERSCAN_PX = 140
 const JUDGMENT_LINE_BOTTOM_OFFSET_PX = 92
 const JUDGMENT_LINE_TOP_OFFSET_PX = 92
 const MIN_JUDGMENT_LINE_Y_PX = 120
+const FOOT_LANES = new Set(['LeftBassPedal', 'RightBassPedal', 'LeftHiHatPedal'])
 
 export const REALTIME_BASE_PIXELS_PER_SECOND = 192
 
@@ -67,6 +98,23 @@ export function getRealtimeJudgmentLineY(viewportHeight: number, reverse: boolea
 
 export function prepareDtxRealtimeData(dtxJson: DtxJson): DtxRealtimeData {
   const sortedChips = [...dtxJson.chips].sort((a, b) => a.lineTimePosition.timePosition - b.lineTimePosition.timePosition)
+  const duplicateCounter = new Map<string, number>()
+  const chips = sortedChips.map((chip) => {
+    const baseKey = [
+      chip.lineTimePosition.barNumber,
+      chip.lineTimePosition.lineNumberInBar,
+      chip.lineTimePosition.timePosition,
+      chip.laneType,
+    ].join(':')
+    const duplicateIndex = duplicateCounter.get(baseKey) ?? 0
+    duplicateCounter.set(baseKey, duplicateIndex + 1)
+
+    return {
+      ...chip,
+      annotationEligible: !FOOT_LANES.has(chip.laneType),
+      noteKey: `${baseKey}:${duplicateIndex}`,
+    }
+  })
 
   return {
     bars: dtxJson.bars
@@ -76,7 +124,7 @@ export function prepareDtxRealtimeData(dtxJson: DtxJson): DtxRealtimeData {
       }))
       .sort((a, b) => a.timePosition - b.timePosition),
     bpmSegments: [...dtxJson.bpmSegments].sort((a, b) => a.startTimePos - b.startTimePos),
-    chips: sortedChips,
+    chips,
     holdChips: sortedChips.filter((chip) => typeof chip.endLineTimePosition?.timePosition === 'number'),
     quarterBarLines: [...dtxJson.quarterBarLines].sort((a, b) => a.timePosition - b.timePosition),
     songDuration: dtxJson.songInfo.songDuration,
@@ -217,20 +265,76 @@ function drawChip(
   zoom: number,
 ) {
   const image = getLoadedChartImage(laneName)
+  const rect = image
+    ? {
+      posX: x,
+      posY: centerY - image.naturalHeight * zoom / 2,
+      width: image.naturalWidth * zoom,
+      height: image.naturalHeight * zoom,
+    }
+    : {
+      posX: x,
+      posY: centerY - fallbackHeight / 2,
+      width: fallbackWidth,
+      height: fallbackHeight,
+    }
 
   if (image) {
-    const width = image.naturalWidth * zoom
-    const height = image.naturalHeight * zoom
-    context.drawImage(image, x, centerY - height / 2, width, height)
+    context.drawImage(image, rect.posX, rect.posY, rect.width, rect.height)
+    return rect
+  }
+
+  drawRect(context, rect, CHIP_COLOR_INFO[laneName] ?? '#d8d8d8')
+  return rect
+}
+
+function drawAnnotationBadge(
+  context: CanvasRenderingContext2D,
+  chipRect: DtxRect,
+  value: DtxHandAnnotation | undefined,
+  selected: boolean,
+  zoom: number,
+) {
+  if (!value) {
     return
   }
 
-  drawRect(context, {
-    posX: x,
-    posY: centerY - fallbackHeight / 2,
-    width: fallbackWidth,
-    height: fallbackHeight,
-  }, CHIP_COLOR_INFO[laneName] ?? '#d8d8d8')
+  const radius = Math.max(8, 9 * zoom)
+  const centerX = chipRect.posX + chipRect.width + radius * 1.35
+  const centerY = chipRect.posY + chipRect.height / 2
+  context.save()
+  context.beginPath()
+  context.arc(centerX, centerY, radius, 0, Math.PI * 2)
+  context.fillStyle = value === 'L' ? '#5d74ff' : '#ff5f9b'
+  context.fill()
+  context.lineWidth = selected ? 2.5 : 1.5
+  context.strokeStyle = selected ? '#ffffff' : 'rgba(255,255,255,0.82)'
+  context.stroke()
+
+  context.fillStyle = '#ffffff'
+  context.font = `700 ${Math.max(10, 12 * zoom)}px Arial`
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.fillText(value, centerX, centerY - 0.8)
+
+  context.restore()
+}
+
+function drawSelectedChipGlow(context: CanvasRenderingContext2D, chipRect: DtxRect, zoom: number) {
+  const padding = Math.max(3, 4 * zoom)
+
+  context.save()
+  context.shadowColor = 'rgba(255, 255, 255, 0.88)'
+  context.shadowBlur = Math.max(10, 14 * zoom)
+  context.strokeStyle = 'rgba(255, 255, 255, 0.95)'
+  context.lineWidth = Math.max(2, 2.5 * zoom)
+  context.strokeRect(
+    chipRect.posX - padding,
+    chipRect.posY - padding,
+    chipRect.width + padding * 2,
+    chipRect.height + padding * 2,
+  )
+  context.restore()
 }
 
 function drawHoldRect(context: CanvasRenderingContext2D, name: string, rect: DtxRect) {
@@ -241,41 +345,34 @@ function formatBarNumber(value: number) {
   return value.toString().padStart(3, '0')
 }
 
-export function renderDtxRealtimeCanvas(
-  canvas: HTMLCanvasElement,
+interface DrawDtxRangeOptions {
+  annotationMode?: boolean
+  annotations?: Record<string, DtxHandAnnotation>
+  drawEndLine?: boolean
+  height: number
+  hitboxes?: DtxRealtimeNoteHitbox[]
+  maxTime: number
+  minTime: number
+  selectedNoteKey?: string | null
+  timeToY: (timePosition: number) => number
+  zoom: number
+}
+
+function drawDtxRange(
+  context: CanvasRenderingContext2D,
   realtimeData: DtxRealtimeData,
   drawingConfig: DtxDrawingConfig,
-  options: RenderDtxRealtimeOptions,
+  options: DrawDtxRangeOptions,
 ) {
-  const context = setCanvasSize(canvas, options.viewportWidth, options.viewportHeight)
-
-  if (!context || options.viewportWidth <= 0 || options.viewportHeight <= 0) {
-    return
-  }
-
+  const { height, maxTime, minTime, timeToY, zoom } = options
   const frameWidth = getFrameRectWidth(drawingConfig.gameMode, drawingConfig.chartMode)
-  const bodyWidth = getFullBodyFrameWidth(drawingConfig.gameMode, drawingConfig.chartMode)
-  const zoom = options.viewportWidth / Math.max(1, bodyWidth)
   const frameX = getFrameRectRelativePosX() * zoom
-  const pixelsPerSecond = Math.max(1, drawingConfig.scale * REALTIME_BASE_PIXELS_PER_SECOND * zoom)
-  const currentTime = realtimeData.songDuration * Math.min(1, Math.max(0, options.progress))
-  const reverse = options.reverse
-  const judgmentLineY = getRealtimeJudgmentLineY(options.viewportHeight, reverse)
-  const minTime = reverse
-    ? currentTime - (options.viewportHeight - judgmentLineY + LINE_OVERSCAN_PX) / pixelsPerSecond
-    : currentTime - (judgmentLineY + LINE_OVERSCAN_PX) / pixelsPerSecond
-  const maxTime = reverse
-    ? currentTime + (judgmentLineY + LINE_OVERSCAN_PX) / pixelsPerSecond
-    : currentTime + (options.viewportHeight - judgmentLineY + LINE_OVERSCAN_PX) / pixelsPerSecond
-  const timeToY = reverse
-    ? (timePosition: number) => judgmentLineY - (timePosition - currentTime) * pixelsPerSecond
-    : (timePosition: number) => judgmentLineY + (timePosition - currentTime) * pixelsPerSecond
 
   drawRect(context, {
     posX: frameX,
     posY: 0,
     width: frameWidth * zoom,
-    height: options.viewportHeight,
+    height,
   }, DEFAULT_BACKGROUND_COLOR)
 
   getItemsInTimeRange(realtimeData.quarterBarLines, minTime, maxTime, (line) => line.timePosition)
@@ -327,7 +424,7 @@ export function renderDtxRealtimeCanvas(
       )
     })
 
-  if (realtimeData.songDuration >= minTime && realtimeData.songDuration <= maxTime) {
+  if (options.drawEndLine && realtimeData.songDuration >= minTime && realtimeData.songDuration <= maxTime) {
     drawHorizontalRect(context, {
       posX: frameX,
       posY: timeToY(realtimeData.songDuration),
@@ -336,42 +433,42 @@ export function renderDtxRealtimeCanvas(
     }, END_LINE_COLOR)
   }
 
-  const holdCandidates = realtimeData.holdChips.filter((chip) => {
-    const startTime = chip.lineTimePosition.timePosition
-    const endTime = chip.endLineTimePosition?.timePosition
-    return typeof endTime === 'number' && startTime <= maxTime && endTime >= minTime
-  })
+  realtimeData.holdChips
+    .filter((chip) => {
+      const startTime = chip.lineTimePosition.timePosition
+      const endTime = chip.endLineTimePosition?.timePosition
+      return typeof endTime === 'number' && startTime <= maxTime && endTime >= minTime
+    })
+    .forEach((chip) => {
+      const endTime = chip.endLineTimePosition?.timePosition
 
-  holdCandidates.forEach((chip) => {
-    const endTime = chip.endLineTimePosition?.timePosition
+      if (typeof endTime !== 'number') {
+        return
+      }
 
-    if (typeof endTime !== 'number') {
-      return
-    }
+      const startY = timeToY(Math.max(minTime, chip.lineTimePosition.timePosition))
+      const endY = timeToY(Math.min(maxTime, endTime))
+      const top = Math.max(0, Math.min(startY, endY))
+      const bottom = Math.min(height, Math.max(startY, endY))
 
-    const startY = timeToY(chip.lineTimePosition.timePosition)
-    const endY = timeToY(endTime)
-    const top = Math.max(0, Math.min(startY, endY))
-    const bottom = Math.min(options.viewportHeight, Math.max(startY, endY))
+      if (bottom <= top) {
+        return
+      }
 
-    if (bottom <= top) {
-      return
-    }
-
-    convertHoldNoteRectsToDrawingImageRects(
-      { posX: 0, posY: 0, width: 19, height: 1 },
-      chip.laneType,
-      drawingConfig.gameMode,
-      drawingConfig.chartMode,
-    ).forEach((holdRect) => {
-      drawHoldRect(context, holdRect.name, {
-        posX: holdRect.rectPos.posX * zoom,
-        posY: top,
-        width: holdRect.rectPos.width * zoom,
-        height: bottom - top,
+      convertHoldNoteRectsToDrawingImageRects(
+        { posX: 0, posY: 0, width: 19, height: 1 },
+        chip.laneType,
+        drawingConfig.gameMode,
+        drawingConfig.chartMode,
+      ).forEach((holdRect) => {
+        drawHoldRect(context, holdRect.name, {
+          posX: holdRect.rectPos.posX * zoom,
+          posY: top,
+          width: holdRect.rectPos.width * zoom,
+          height: bottom - top,
+        })
       })
     })
-  })
 
   getItemsInTimeRange(realtimeData.chips, minTime, maxTime, (chip) => chip.lineTimePosition.timePosition)
     .forEach((chip) => {
@@ -379,7 +476,7 @@ export function renderDtxRealtimeCanvas(
 
       getRelativeSizePosOfChipsForLaneCode(chip.laneType, drawingConfig.gameMode, drawingConfig.chartMode)
         .forEach((lane) => {
-          drawChip(
+          const chipRect = drawChip(
             context,
             lane.drawingLane,
             lane.chipRelativePosSize.posX * zoom,
@@ -388,8 +485,76 @@ export function renderDtxRealtimeCanvas(
             lane.chipRelativePosSize.height * zoom,
             zoom,
           )
+          const annotationEligible = drawingConfig.gameMode === 'Drum' && chip.annotationEligible
+          const selected = options.selectedNoteKey === chip.noteKey
+
+          if (selected && annotationEligible) {
+            drawSelectedChipGlow(context, chipRect, zoom)
+          }
+
+          if (annotationEligible) {
+            drawAnnotationBadge(context, chipRect, options.annotations?.[chip.noteKey], selected, zoom)
+          }
+
+          if (options.annotationMode && annotationEligible && options.hitboxes) {
+            const hitPadding = Math.max(8, 8 * zoom)
+            options.hitboxes.push({
+              centerX: chipRect.posX + chipRect.width / 2,
+              centerY: chipRect.posY + chipRect.height / 2,
+              height: chipRect.height + hitPadding * 2,
+              noteKey: chip.noteKey,
+              width: chipRect.width + hitPadding * 2,
+              x: chipRect.posX - hitPadding,
+              y: chipRect.posY - hitPadding,
+            })
+          }
         })
     })
+}
+
+export function renderDtxRealtimeCanvas(
+  canvas: HTMLCanvasElement,
+  realtimeData: DtxRealtimeData,
+  drawingConfig: DtxDrawingConfig,
+  options: RenderDtxRealtimeOptions,
+) {
+  const hitboxes: DtxRealtimeNoteHitbox[] = []
+  const context = setCanvasSize(canvas, options.viewportWidth, options.viewportHeight)
+
+  if (!context || options.viewportWidth <= 0 || options.viewportHeight <= 0) {
+    return hitboxes
+  }
+
+  const frameWidth = getFrameRectWidth(drawingConfig.gameMode, drawingConfig.chartMode)
+  const bodyWidth = getFullBodyFrameWidth(drawingConfig.gameMode, drawingConfig.chartMode)
+  const zoom = options.viewportWidth / Math.max(1, bodyWidth)
+  const frameX = getFrameRectRelativePosX() * zoom
+  const pixelsPerSecond = Math.max(1, drawingConfig.scale * REALTIME_BASE_PIXELS_PER_SECOND * zoom)
+  const currentTime = realtimeData.songDuration * Math.min(1, Math.max(0, options.progress))
+  const reverse = options.reverse
+  const judgmentLineY = getRealtimeJudgmentLineY(options.viewportHeight, reverse)
+  const minTime = reverse
+    ? currentTime - (options.viewportHeight - judgmentLineY + LINE_OVERSCAN_PX) / pixelsPerSecond
+    : currentTime - (judgmentLineY + LINE_OVERSCAN_PX) / pixelsPerSecond
+  const maxTime = reverse
+    ? currentTime + (judgmentLineY + LINE_OVERSCAN_PX) / pixelsPerSecond
+    : currentTime + (options.viewportHeight - judgmentLineY + LINE_OVERSCAN_PX) / pixelsPerSecond
+  const timeToY = reverse
+    ? (timePosition: number) => judgmentLineY - (timePosition - currentTime) * pixelsPerSecond
+    : (timePosition: number) => judgmentLineY + (timePosition - currentTime) * pixelsPerSecond
+
+  drawDtxRange(context, realtimeData, drawingConfig, {
+    annotationMode: options.annotationMode,
+    annotations: options.annotations,
+    drawEndLine: true,
+    height: options.viewportHeight,
+    hitboxes,
+    maxTime,
+    minTime,
+    selectedNoteKey: options.selectedNoteKey,
+    timeToY,
+    zoom,
+  })
 
   drawHorizontalRect(context, {
     posX: frameX,
@@ -397,4 +562,57 @@ export function renderDtxRealtimeCanvas(
     width: frameWidth * zoom,
     height: Math.max(2, 2 * zoom),
   }, 'rgba(255,255,255,0.64)')
+
+  if (options.annotationMode) {
+    options.bookmarkTimes?.forEach((bookmarkTime) => {
+      if (bookmarkTime < minTime || bookmarkTime > maxTime) {
+        return
+      }
+
+      drawHorizontalRect(context, {
+        posX: frameX,
+        posY: timeToY(bookmarkTime),
+        width: frameWidth * zoom,
+        height: Math.max(2, 2 * zoom),
+      }, ANNOTATION_BOOKMARK_COLOR)
+    })
+  }
+
+  return hitboxes
+}
+
+export function renderDtxAnnotationExportCanvas(
+  canvas: HTMLCanvasElement,
+  realtimeData: DtxRealtimeData,
+  drawingConfig: DtxDrawingConfig,
+  options: RenderDtxAnnotationExportOptions,
+) {
+  const startTime = Math.max(0, Math.min(options.startTime, options.endTime, realtimeData.songDuration))
+  const endTime = Math.max(startTime, Math.min(Math.max(options.startTime, options.endTime), realtimeData.songDuration))
+  const width = Math.max(1, Math.ceil(options.width))
+  const bodyWidth = getFullBodyFrameWidth(drawingConfig.gameMode, drawingConfig.chartMode)
+  const zoom = width / Math.max(1, bodyWidth)
+  const pixelsPerSecond = Math.max(1, drawingConfig.scale * REALTIME_BASE_PIXELS_PER_SECOND * zoom)
+  const padding = Math.max(18, 24 * zoom)
+  const height = Math.max(180, Math.ceil((endTime - startTime) * pixelsPerSecond + padding * 2))
+  const context = setCanvasSize(canvas, width, height)
+
+  if (!context) {
+    return height
+  }
+
+  const timeToY = options.reverse
+    ? (timePosition: number) => padding + (endTime - timePosition) * pixelsPerSecond
+    : (timePosition: number) => padding + (timePosition - startTime) * pixelsPerSecond
+
+  drawDtxRange(context, realtimeData, drawingConfig, {
+    annotations: options.annotations,
+    height,
+    maxTime: endTime,
+    minTime: startTime,
+    timeToY,
+    zoom,
+  })
+
+  return height
 }
