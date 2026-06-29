@@ -9,8 +9,8 @@ import {
 } from './native-app-update'
 
 const UPDATE_MANIFEST_URL = 'https://gitadora.selundine.top/releases/android/latest/update.json'
-export const FALLBACK_VERSION_NAME = '1.2.2'
-const FALLBACK_VERSION_CODE = 14
+export const FALLBACK_VERSION_NAME = '1.2.3'
+const FALLBACK_VERSION_CODE = 15
 const UPDATE_FETCH_TIMEOUT_MS = 10000
 const AUTO_PROMPT_INTERVAL_MS = 24 * 60 * 60 * 1000
 const LAST_PROMPT_STORAGE_KEY = 'gddata:update:last-prompt'
