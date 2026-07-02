@@ -1,11 +1,54 @@
 const AUDIO_BLOB_CACHE_LIMIT = 6
-const AUDIO_METADATA_TIMEOUT_MS = 15000
+const AUDIO_CONTEXT_RESUME_TIMEOUT_MS = 5000
+const PLAYBACK_START_DELAY_SECONDS = 0.05
 const audioBlobCache = new Map<string, Promise<Blob>>()
+let sharedAudioContext: AudioContext | null = null
 
 export interface LoadedChartAudio {
-  element: HTMLAudioElement
-  duration: number
+  readonly currentTime: number
+  readonly duration: number
   destroy: () => void
+  pause: () => void
+  play: () => Promise<void>
+  seek: (time: number) => void
+}
+
+function getAudioContext() {
+  if (!sharedAudioContext) {
+    if (typeof AudioContext === 'undefined') {
+      throw new Error('当前环境不支持音频播放')
+    }
+
+    sharedAudioContext = new AudioContext()
+  }
+
+  return sharedAudioContext
+}
+
+async function resumeAudioContext(context: AudioContext) {
+  if (context.state === 'running') {
+    return
+  }
+
+  let timeout = 0
+
+  try {
+    await Promise.race([
+      context.resume(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = window.setTimeout(
+          () => reject(new Error('音频设备启动超时')),
+          AUDIO_CONTEXT_RESUME_TIMEOUT_MS,
+        )
+      }),
+    ])
+  } finally {
+    window.clearTimeout(timeout)
+  }
+
+  if ((context.state as string) !== 'running') {
+    throw new Error('音频设备启动失败')
+  }
 }
 
 function rememberAudioBlob(url: string, promise: Promise<Blob>) {
@@ -43,7 +86,7 @@ async function downloadAudioBlob(url: string) {
         throw new Error('音频文件为空')
       }
 
-      return blob.type ? blob : new Blob([blob], { type: 'audio/ogg' })
+      return blob
     })
     .catch((error) => {
       audioBlobCache.delete(url)
@@ -54,73 +97,130 @@ async function downloadAudioBlob(url: string) {
   return await promise
 }
 
-function waitForAudioMetadata(audio: HTMLAudioElement) {
-  return new Promise<number>((resolve, reject) => {
-    let timeout = 0
+function createLoadedChartAudio(context: AudioContext, decodedBuffer: AudioBuffer): LoadedChartAudio {
+  const duration = decodedBuffer.duration
+  let buffer: AudioBuffer | null = decodedBuffer
+  let source: AudioBufferSourceNode | null = null
+  let offset = 0
+  let startedAt = 0
+  let playing = false
+  let destroyed = false
 
-    const cleanup = () => {
-      window.clearTimeout(timeout)
-      audio.removeEventListener('loadedmetadata', handleMetadata)
-      audio.removeEventListener('durationchange', handleMetadata)
-      audio.removeEventListener('error', handleError)
+  const clampTime = (time: number) => Math.min(duration, Math.max(0, time))
+  const getCurrentTime = () => {
+    if (!playing) {
+      return offset
     }
-    const handleMetadata = () => {
-      if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+
+    return clampTime(offset + Math.max(0, context.currentTime - startedAt))
+  }
+  const stopSource = () => {
+    if (!source) {
+      return
+    }
+
+    source.onended = null
+
+    try {
+      source.stop()
+    } catch {
+      // The source may already have ended.
+    }
+
+    source.disconnect()
+    source = null
+  }
+  const scheduleSource = () => {
+    if (!buffer || offset >= duration) {
+      return
+    }
+
+    const nextSource = context.createBufferSource()
+    const startAt = context.currentTime + PLAYBACK_START_DELAY_SECONDS
+    nextSource.buffer = buffer
+    nextSource.connect(context.destination)
+    nextSource.onended = () => {
+      if (source !== nextSource) {
         return
       }
 
-      cleanup()
-      resolve(audio.duration)
+      nextSource.disconnect()
+      source = null
+      offset = duration
+      startedAt = 0
+      playing = false
     }
-    const handleError = () => {
-      cleanup()
-      reject(new Error('音频文件无法解码'))
-    }
+    source = nextSource
+    startedAt = startAt
+    playing = true
+    nextSource.start(startAt, offset)
+  }
+  const pause = () => {
+    offset = getCurrentTime()
+    playing = false
+    startedAt = 0
+    stopSource()
+  }
 
-    audio.addEventListener('loadedmetadata', handleMetadata)
-    audio.addEventListener('durationchange', handleMetadata)
-    audio.addEventListener('error', handleError)
-    timeout = window.setTimeout(() => {
-      cleanup()
-      reject(new Error('音频初始化超时'))
-    }, AUDIO_METADATA_TIMEOUT_MS)
-    handleMetadata()
-  })
+  return {
+    duration,
+    get currentTime() {
+      return getCurrentTime()
+    },
+    async play() {
+      if (destroyed || !buffer) {
+        throw new Error('音频已释放')
+      }
+
+      if (offset >= duration) {
+        offset = 0
+      }
+
+      await resumeAudioContext(context)
+
+      if (destroyed || !buffer) {
+        throw new Error('音频已释放')
+      }
+
+      stopSource()
+      scheduleSource()
+    },
+    pause,
+    seek(time: number) {
+      if (destroyed) {
+        return
+      }
+
+      const shouldResume = playing
+      playing = false
+      startedAt = 0
+      stopSource()
+      offset = clampTime(time)
+
+      if (shouldResume) {
+        scheduleSource()
+      }
+    },
+    destroy() {
+      if (destroyed) {
+        return
+      }
+
+      pause()
+      destroyed = true
+      buffer = null
+    },
+  }
 }
 
 export async function loadChartAudio(url: string): Promise<LoadedChartAudio> {
   const blob = await downloadAudioBlob(url)
-  const objectUrl = URL.createObjectURL(blob)
-  const audio = new Audio()
+  const context = getAudioContext()
+  const decodedBuffer = await context.decodeAudioData(await blob.arrayBuffer())
 
-  audio.preload = 'auto'
-  audio.playbackRate = 1
-  audio.src = objectUrl
-
-  try {
-    audio.load()
-    const duration = await waitForAudioMetadata(audio)
-    let destroyed = false
-
-    return {
-      element: audio,
-      duration,
-      destroy: () => {
-        if (destroyed) {
-          return
-        }
-
-        destroyed = true
-        audio.pause()
-        audio.removeAttribute('src')
-        audio.load()
-        URL.revokeObjectURL(objectUrl)
-      },
-    }
-  } catch (error) {
-    audio.removeAttribute('src')
-    audio.load()
-    URL.revokeObjectURL(objectUrl)
-    throw error
+  if (!Number.isFinite(decodedBuffer.duration) || decodedBuffer.duration <= 0) {
+    throw new Error('音频文件无法解码')
   }
+
+  return createLoadedChartAudio(context, decodedBuffer)
 }

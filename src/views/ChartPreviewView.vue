@@ -125,6 +125,7 @@ const rafAverageIntervalMs = ref(0)
 const rafLastIntervalMs = ref(0)
 let loadSequence = 0
 let audioLoadSequence = 0
+let playbackRequestSequence = 0
 let playbackFrame = 0
 let playbackStartedAt = 0
 let playbackStartedTime = 0
@@ -179,6 +180,7 @@ const STATIC_ZOOM_MAX = 5
 const CHART_PREVIEW_SPEED_STORAGE_KEY = 'gddata.chartPreview.speed'
 const CHART_PREVIEW_BARS_PER_COLUMN_STORAGE_KEY = 'gddata.chartPreview.barsPerColumn'
 const CHART_PREVIEW_REVERSE_STORAGE_KEY = 'gddata.chartPreview.reverse'
+const CHART_PREVIEW_AUDIO_TRACK_STORAGE_KEY = 'gddata.chartPreview.audioTrack'
 const PROGRESS_RANGE_MAX = 1000
 const PROGRESS_EDGE_INSET_PX = 20
 const RAF_DEBUG_SMOOTHING = 0.12
@@ -552,6 +554,18 @@ function writeStoredReverse(enabled: boolean) {
   }
 }
 
+function readStoredAudioTrackEnabled() {
+  return getPreferenceStorage()?.getItem(CHART_PREVIEW_AUDIO_TRACK_STORAGE_KEY) === '1'
+}
+
+function writeStoredAudioTrackEnabled(enabled: boolean) {
+  try {
+    getPreferenceStorage()?.setItem(CHART_PREVIEW_AUDIO_TRACK_STORAGE_KEY, enabled ? '1' : '0')
+  } catch {
+    // Preference persistence is best effort.
+  }
+}
+
 function getAnnotationStorageKey(currentPreview = preview.value) {
   if (!currentPreview) {
     return ''
@@ -746,39 +760,11 @@ function showPlaybackNotice(message: string) {
 
 function releaseLoadedChartAudio() {
   if (loadedChartAudio) {
-    loadedChartAudio.element.removeEventListener('ended', handleChartAudioEnded)
-    loadedChartAudio.element.removeEventListener('error', handleChartAudioError)
     loadedChartAudio.destroy()
     loadedChartAudio = null
   }
 
   audioDurationSeconds.value = 0
-}
-
-function handleChartAudioEnded() {
-  setPlaybackTime(timelineDurationSeconds.value)
-  stopPlayback()
-}
-
-function handleChartAudioError() {
-  if (audioPlaybackPending.value) {
-    return
-  }
-
-  const shouldResume = playing.value
-  const currentTime = loadedChartAudio?.element.currentTime ?? playbackTimeSeconds.value
-
-  stopPlayback()
-  resumeAfterProgressSeek = false
-  resumeAfterChartSeek = false
-  releaseLoadedChartAudio()
-  audioTrackEnabled.value = false
-  setPlaybackTime(currentTime)
-  showPlaybackNotice('音频播放失败，已切换为无声播放')
-
-  if (shouldResume) {
-    void startPlayback()
-  }
 }
 
 async function prepareChartAudio(currentPreview: LoadedDtxChartPreview, sequence: number) {
@@ -805,8 +791,6 @@ async function prepareChartAudio(currentPreview: LoadedDtxChartPreview, sequence
 
     loadedChartAudio = loadedAudio
     audioDurationSeconds.value = loadedAudio.duration
-    loadedAudio.element.addEventListener('ended', handleChartAudioEnded)
-    loadedAudio.element.addEventListener('error', handleChartAudioError)
     seekViewerTime(playbackTimeSeconds.value)
   } catch {
     if (sequence === loadSequence && currentAudioSequence === audioLoadSequence) {
@@ -834,6 +818,7 @@ async function loadCurrentChart() {
   audioLoadSequence += 1
   releaseLoadedChartAudio()
   audioLoading.value = false
+  audioPlaybackPending.value = false
   loading.value = true
   errorMessage.value = ''
   preview.value = null
@@ -911,9 +896,9 @@ async function loadCurrentChart() {
       annotationModeEnabled.value = false
     }
 
-    if (!loadedPreview.chart.audioUrl) {
-      audioTrackEnabled.value = false
-    }
+    audioTrackEnabled.value = Boolean(
+      loadedPreview.chart.audioUrl && readStoredAudioTrackEnabled(),
+    )
     setPlaybackTime(
       previousPreview?.chart.musicId === musicId
         && previousInstrument === selection.instrument
@@ -1517,7 +1502,7 @@ async function updateAudioTrackEnabled(enabled: boolean) {
   }
 
   const shouldResume = playing.value
-  const currentTime = loadedChartAudio?.element.currentTime ?? playbackTimeSeconds.value
+  const currentTime = loadedChartAudio?.currentTime ?? playbackTimeSeconds.value
   const currentSequence = loadSequence
 
   stopPlayback()
@@ -1525,6 +1510,7 @@ async function updateAudioTrackEnabled(enabled: boolean) {
   audioLoading.value = false
   releaseLoadedChartAudio()
   audioTrackEnabled.value = enabled
+  writeStoredAudioTrackEnabled(enabled)
   setPlaybackTime(currentTime)
 
   if (enabled && currentPreview) {
@@ -1547,10 +1533,7 @@ function seekViewerTime(time: number) {
   setPlaybackTime(time)
 
   if (loadedChartAudio) {
-    loadedChartAudio.element.currentTime = Math.min(
-      loadedChartAudio.duration,
-      playbackTimeSeconds.value,
-    )
+    loadedChartAudio.seek(playbackTimeSeconds.value)
   }
 
   if (playing.value && !loadedChartAudio) {
@@ -1723,9 +1706,12 @@ function handleProgressKeydown(event: KeyboardEvent) {
 }
 
 function stopPlayback() {
+  playbackRequestSequence += 1
+  audioPlaybackPending.value = false
+
   if (loadedChartAudio) {
-    setPlaybackTime(loadedChartAudio.element.currentTime)
-    loadedChartAudio.element.pause()
+    loadedChartAudio.pause()
+    setPlaybackTime(loadedChartAudio.currentTime)
   }
 
   playing.value = false
@@ -1750,9 +1736,9 @@ function runPlayback(timestamp: number) {
   }
 
   if (loadedChartAudio) {
-    setPlaybackTime(loadedChartAudio.element.currentTime)
+    setPlaybackTime(loadedChartAudio.currentTime)
 
-    if (loadedChartAudio.element.ended || playbackTimeSeconds.value >= duration) {
+    if (playbackTimeSeconds.value >= duration) {
       setPlaybackTime(duration)
       stopPlayback()
       return
@@ -1797,21 +1783,42 @@ async function startPlayback() {
 
   settingsPanelOpen.value = false
   audioPlaybackPending.value = true
+  const currentPlaybackRequest = ++playbackRequestSequence
+  const currentAudio = loadedChartAudio
+  const currentSequence = loadSequence
 
-  if (loadedChartAudio) {
+  if (currentAudio) {
     try {
-      loadedChartAudio.element.currentTime = Math.min(
-        loadedChartAudio.duration,
-        playbackTimeSeconds.value,
-      )
-      await loadedChartAudio.element.play()
+      await currentAudio.play()
+
+      if (
+        currentPlaybackRequest !== playbackRequestSequence
+        || currentSequence !== loadSequence
+        || currentAudio !== loadedChartAudio
+        || !audioTrackEnabled.value
+      ) {
+        currentAudio.pause()
+        return
+      }
     } catch {
+      if (
+        currentPlaybackRequest !== playbackRequestSequence
+        || currentSequence !== loadSequence
+        || currentAudio !== loadedChartAudio
+      ) {
+        return
+      }
+
       const currentTime = playbackTimeSeconds.value
       releaseLoadedChartAudio()
       audioTrackEnabled.value = false
       setPlaybackTime(currentTime)
       showPlaybackNotice('音频播放失败，已切换为无声播放')
     }
+  }
+
+  if (currentPlaybackRequest !== playbackRequestSequence) {
+    return
   }
 
   audioPlaybackPending.value = false
