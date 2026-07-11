@@ -65,7 +65,7 @@ interface RenderDtxAnnotationExportOptions {
 
 const DEFAULT_BACKGROUND_COLOR = '#1f1f1f'
 const END_LINE_COLOR = '#ff0000'
-const ANNOTATION_BOOKMARK_COLOR = '#e3374f'
+const BOOKMARK_COLOR = '#e3374f'
 const LINE_OVERSCAN_PX = 140
 const JUDGMENT_LINE_BOTTOM_OFFSET_PX = 92
 const JUDGMENT_LINE_TOP_OFFSET_PX = 92
@@ -563,20 +563,18 @@ export function renderDtxRealtimeCanvas(
     height: Math.max(2, 2 * zoom),
   }, 'rgba(255,255,255,0.64)')
 
-  if (options.annotationMode) {
-    options.bookmarkTimes?.forEach((bookmarkTime) => {
-      if (bookmarkTime < minTime || bookmarkTime > maxTime) {
-        return
-      }
+  options.bookmarkTimes?.forEach((bookmarkTime) => {
+    if (bookmarkTime < minTime || bookmarkTime > maxTime) {
+      return
+    }
 
-      drawHorizontalRect(context, {
-        posX: frameX,
-        posY: timeToY(bookmarkTime),
-        width: frameWidth * zoom,
-        height: Math.max(2, 2 * zoom),
-      }, ANNOTATION_BOOKMARK_COLOR)
-    })
-  }
+    drawHorizontalRect(context, {
+      posX: frameX,
+      posY: timeToY(bookmarkTime),
+      width: frameWidth * zoom,
+      height: Math.max(2, 2 * zoom),
+    }, BOOKMARK_COLOR)
+  })
 
   return hitboxes
 }

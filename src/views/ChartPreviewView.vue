@@ -15,6 +15,11 @@ import {
 } from '../lib/chart-preview-manifest'
 import { loadChartAudio } from '../lib/chart-preview-audio'
 import { loadDtxChartPreview } from '../lib/chart-preview-loader'
+import {
+  clampPlaybackLoopRange,
+  resolvePlaybackLoopRange,
+  resolvePlaybackLoopSeekTime,
+} from '../lib/chart-preview-loop'
 import { loadBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
 import { loadSongByMusicId } from '../lib/song-catalog'
 import { useDebugMode } from '../lib/debug-mode'
@@ -106,7 +111,7 @@ const annotationModeEnabled = ref(false)
 const showAnnotations = ref(false)
 const annotationSelectedNoteKey = ref<string | null>(null)
 const chartAnnotations = ref<Record<string, DtxHandAnnotation>>({})
-const annotationBookmarks = ref<number[]>([])
+const playbackBookmarks = ref<number[]>([])
 const annotationExporting = ref(false)
 const dynamicDragging = ref(false)
 const staticDragging = ref(false)
@@ -264,14 +269,13 @@ const currentBarNumber = computed(() => {
 
   return currentBar
 })
-const currentBarProgressLabel = computed(() => {
+const currentBarLabel = computed(() => {
   const bars = preview.value?.dtxJson.bars ?? []
-
-  if (bars.length === 0) {
-    return '--- / ---'
-  }
-
-  return `${formatBarNumber(currentBarNumber.value)} / ${formatBarNumber(bars.length - 1)}`
+  return bars.length > 0 ? formatBarNumber(currentBarNumber.value) : '---'
+})
+const totalBarLabel = computed(() => {
+  const bars = preview.value?.dtxJson.bars ?? []
+  return bars.length > 0 ? formatBarNumber(bars.length - 1) : '---'
 })
 const canDecreaseSpeed = computed(() => selectedSpeed.value > SPEED_MIN)
 const canIncreaseSpeed = computed(() => selectedSpeed.value < SPEED_MAX)
@@ -305,28 +309,29 @@ const annotationModeAvailable = computed(() => {
 const annotationModeActive = computed(() => {
   return annotationModeEnabled.value && annotationModeAvailable.value
 })
+const playerProgressStartLabel = computed(() => (
+  annotationModeActive.value ? currentBarLabel.value : currentTimeLabel.value
+))
+const playerProgressEndLabel = computed(() => (
+  annotationModeActive.value ? totalBarLabel.value : totalTimeLabel.value
+))
 const annotationDisplayActive = computed(() => {
   return annotationModeActive.value || showAnnotations.value
 })
-const hasAnnotations = computed(() => Object.keys(chartAnnotations.value).length > 0)
-const annotationExportRange = computed(() => {
-  const [firstBookmark, secondBookmark] = annotationBookmarks.value
-
-  if (!firstBookmark || !secondBookmark) {
-    return null
-  }
-
-  return {
-    startTime: Math.min(firstBookmark, secondBookmark),
-    endTime: Math.max(firstBookmark, secondBookmark),
-  }
-})
-const annotationBookmarkMarkers = computed(() => {
-  if (!annotationModeActive.value) {
+const playbackLoopRange = computed(() => clampPlaybackLoopRange(
+  resolvePlaybackLoopRange(playbackBookmarks.value),
+  timelineDurationSeconds.value,
+))
+const visiblePlaybackBookmarks = computed(() => {
+  if (!preview.value) {
     return []
   }
 
-  return annotationBookmarks.value.map((bookmark, index) => {
+  const range = playbackLoopRange.value
+  return range ? [range.startTime, range.endTime] : playbackBookmarks.value
+})
+const playbackBookmarkMarkers = computed(() => {
+  return visiblePlaybackBookmarks.value.map((bookmark, index) => {
     const progress = Math.min(1, Math.max(0, bookmark / Math.max(1, timelineDurationSeconds.value)))
     return {
       index,
@@ -334,14 +339,17 @@ const annotationBookmarkMarkers = computed(() => {
     }
   })
 })
-const annotationBookmarkButtonLabel = computed(() => {
-  return annotationBookmarks.value.length === 1 ? '设置导出区间终点' : '设置导出区间起点'
+const playbackBookmarkButtonLabel = computed(() => {
+  if (playbackBookmarks.value.length === 1) {
+    return '设置 B 点'
+  }
+
+  return playbackBookmarks.value.length === 2 ? '重新设置 A 点' : '设置 A 点'
 })
 const canExportAnnotations = computed(() => (
   selectedInstrumentKey.value === 'drum'
   && Boolean(preview.value)
-  && hasAnnotations.value
-  && Boolean(annotationExportRange.value)
+  && Boolean(playbackLoopRange.value)
 ))
 const selectedAnnotationValue = computed(() => {
   const noteKey = annotationSelectedNoteKey.value
@@ -386,11 +394,6 @@ const annotationProgressSegments = computed(() => {
       width: `calc((100% - ${PROGRESS_EDGE_INSET_PX * 2}px) * ${Math.max(0.0035, (endTime - startTime) / duration)})`,
     }
   })
-})
-const playerProgressLabel = computed(() => {
-  return annotationModeActive.value
-    ? currentBarProgressLabel.value
-    : `${currentTimeLabel.value} / ${totalTimeLabel.value}`
 })
 const annotationExportDifficultyText = computed(() => {
   return levelOptions.value.find((level) => level.key === selectedLevelKey.value)?.difficultyText ?? '-.-'
@@ -889,7 +892,7 @@ async function loadCurrentChart() {
       || previousInstrument !== selection.instrument
       || previousLevel !== selection.level
     ) {
-      annotationBookmarks.value = []
+      playbackBookmarks.value = []
     }
 
     if (selection.instrument !== 'drum') {
@@ -1429,16 +1432,20 @@ function clearSelectedAnnotation() {
   writeStoredAnnotations()
 }
 
-function setAnnotationBookmark() {
-  if (!annotationModeActive.value) {
+function setPlaybackBookmark() {
+  if (!preview.value || chartRenderMode.value !== 'realtime' || dtxDurationSeconds.value <= 0) {
     return
   }
 
-  const settingOutPoint = annotationBookmarks.value.length === 1
+  const settingOutPoint = playbackBookmarks.value.length === 1
   const bookmark = Math.min(dtxDurationSeconds.value, Math.max(0, playbackTimeSeconds.value))
-  annotationBookmarks.value = annotationBookmarks.value.length === 1
-    ? [...annotationBookmarks.value, bookmark]
-    : [bookmark]
+
+  if (settingOutPoint && !resolvePlaybackLoopRange([...playbackBookmarks.value, bookmark])) {
+    showPlaybackNotice('请移动播放位置后再设置 B 点')
+    return
+  }
+
+  playbackBookmarks.value = settingOutPoint ? [...playbackBookmarks.value, bookmark] : [bookmark]
   showPlaybackNotice(settingOutPoint ? '已标记出点' : '已标记入点')
 }
 
@@ -1446,7 +1453,7 @@ async function exportAnnotationsImage() {
   const currentPreview = preview.value
   const exportStage = annotationExportStageRef.value
   const exportCanvas = annotationExportCanvasRef.value
-  const range = annotationExportRange.value
+  const range = playbackLoopRange.value
 
   if (annotationExporting.value || !currentPreview || !exportStage || !exportCanvas || !range) {
     return
@@ -1723,6 +1730,22 @@ function stopPlayback() {
   }
 }
 
+function restartPlaybackLoopIfNeeded() {
+  const loopTime = resolvePlaybackLoopSeekTime(
+    playbackTimeSeconds.value,
+    playbackLoopRange.value,
+  )
+
+  if (loopTime === null) {
+    return false
+  }
+
+  stopPlayback()
+  seekViewerTime(loopTime)
+  void startPlayback()
+  return true
+}
+
 function runPlayback(timestamp: number) {
   if (!playing.value) {
     return
@@ -1737,6 +1760,10 @@ function runPlayback(timestamp: number) {
 
   if (loadedChartAudio) {
     setPlaybackTime(loadedChartAudio.currentTime)
+
+    if (restartPlaybackLoopIfNeeded()) {
+      return
+    }
 
     if (playbackTimeSeconds.value >= duration) {
       setPlaybackTime(duration)
@@ -1756,6 +1783,10 @@ function runPlayback(timestamp: number) {
   const elapsedSeconds = Math.max(0, (timestamp - playbackStartedAt) / 1000)
   const nextTime = Math.min(duration, playbackStartedTime + elapsedSeconds)
   setPlaybackTime(nextTime)
+
+  if (restartPlaybackLoopIfNeeded()) {
+    return
+  }
 
   if (nextTime >= duration) {
     setPlaybackTime(duration)
@@ -1777,7 +1808,14 @@ async function startPlayback() {
     return
   }
 
-  if (playbackTimeSeconds.value >= duration - 0.01) {
+  const loopTime = resolvePlaybackLoopSeekTime(
+    playbackTimeSeconds.value,
+    playbackLoopRange.value,
+  )
+
+  if (loopTime !== null) {
+    seekViewerTime(loopTime)
+  } else if (playbackTimeSeconds.value >= duration - 0.01) {
     seekViewerTime(0)
   }
 
@@ -2062,7 +2100,7 @@ onBeforeUnmount(() => {
           v-else
           :annotation-mode="annotationModeActive"
           :annotations="annotationDisplayActive ? chartAnnotations : undefined"
-          :bookmark-times="annotationBookmarks"
+          :bookmark-times="visiblePlaybackBookmarks"
           :drawing-config="preview.drawingConfig"
           :dtx-json="preview.dtxJson"
           :progress="chartPlaybackProgress"
@@ -2354,7 +2392,7 @@ onBeforeUnmount(() => {
             :style="{ left: segment.left, width: segment.width }"
           ></span>
           <span
-            v-for="marker in annotationBookmarkMarkers"
+            v-for="marker in playbackBookmarkMarkers"
             :key="marker.index"
             class="chart-preview__progress-bookmark"
             :style="{ left: marker.left }"
@@ -2371,18 +2409,22 @@ onBeforeUnmount(() => {
         class="chart-preview__player-inner"
         :class="{ 'chart-preview__player-inner--annotation': annotationModeActive }"
       >
-        <span class="chart-preview__time">{{ playerProgressLabel }}</span>
-        <div v-if="annotationModeActive" class="chart-preview__annotation-controls">
+        <div class="chart-preview__time">
+          <span class="chart-preview__time-value">{{ playerProgressStartLabel }}</span>
           <button
-            class="chart-preview__annotation-button chart-preview__annotation-button--bookmark"
+            class="chart-preview__time-bookmark"
             type="button"
-            :aria-label="annotationBookmarkButtonLabel"
-            @click="setAnnotationBookmark"
+            :disabled="!preview || timelineDurationSeconds <= 0 || chartRenderMode === 'static'"
+            :aria-label="playbackBookmarkButtonLabel"
+            @click="setPlaybackBookmark"
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M6 4H18V21L12 17L6 21V4Z"></path>
             </svg>
           </button>
+          <span class="chart-preview__time-value">{{ playerProgressEndLabel }}</span>
+        </div>
+        <div v-if="annotationModeActive" class="chart-preview__annotation-controls">
           <button
             class="chart-preview__annotation-button chart-preview__annotation-button--left"
             type="button"
@@ -2767,15 +2809,69 @@ onBeforeUnmount(() => {
 }
 
 .chart-preview__player-inner--annotation {
-  grid-template-columns: 1fr 184px 1fr;
+  grid-template-columns: 1fr 136px 1fr;
 }
 
 .chart-preview__time {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  justify-self: start;
   color: #27213d;
   font-family: var(--font-figma-title);
   font-size: 14px;
   font-weight: 400;
   white-space: nowrap;
+}
+
+.chart-preview__time-value {
+  display: inline-block;
+  width: 5ch;
+  font-feature-settings: 'tnum' 1;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.chart-preview__player-inner--annotation .chart-preview__time-value {
+  width: 3ch;
+}
+
+.chart-preview__time-bookmark {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--note-purple);
+  cursor: pointer;
+}
+
+.chart-preview__time-bookmark svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.chart-preview__time-bookmark:active {
+  background: rgba(75, 59, 118, 0.12);
+}
+
+.chart-preview__time-bookmark:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+.chart-preview__time-bookmark:disabled {
+  cursor: default;
+  opacity: 0.36;
 }
 
 .chart-preview__annotation-controls {
@@ -2816,16 +2912,6 @@ onBeforeUnmount(() => {
 .chart-preview__annotation-button--clear {
   font-size: 22px;
   line-height: 1;
-}
-
-.chart-preview__annotation-button--bookmark svg {
-  width: 20px;
-  height: 20px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2;
 }
 
 .chart-preview__annotation-button:disabled {
@@ -3407,6 +3493,21 @@ onBeforeUnmount(() => {
 .chart-preview-panel-leave-to {
   opacity: 0;
   transform: translateY(18px);
+}
+
+@media (max-width: 340px) {
+  .chart-preview__player-inner--annotation {
+    grid-template-columns: 1fr 112px 1fr;
+  }
+
+  .chart-preview__annotation-controls {
+    gap: 4px;
+  }
+
+  .chart-preview__annotation-button {
+    width: 34px;
+    height: 34px;
+  }
 }
 
 @keyframes chartPreviewSkeletonSweep {
