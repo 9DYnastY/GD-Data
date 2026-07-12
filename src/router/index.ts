@@ -47,6 +47,7 @@ const router = createRouter({
       name: 'skill-history',
       component: () => import('../views/RecentPlayHistoryView.vue'),
       meta: {
+        showBottomNav: true,
         showSharedBackground: true,
       },
     },

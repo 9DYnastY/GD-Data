@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DtxChartCanvas from '../components/DtxChartCanvas.vue'
 import DtxRealtimeCanvas from '../components/DtxRealtimeCanvas.vue'
+import { showAppToast } from '../lib/app-toast'
 import menuIconSrc from '../assets/chart-preview/note-menu.png'
 import pauseIconSrc from '../assets/chart-preview/note-pause.png'
 import playIconSrc from '../assets/chart-preview/note-play.png'
@@ -125,7 +126,6 @@ const audioDurationSeconds = ref(0)
 const audioLoading = ref(false)
 const audioPlaybackPending = ref(false)
 const audioTrackEnabled = ref(false)
-const playbackNotice = ref('')
 const rafAverageIntervalMs = ref(0)
 const rafLastIntervalMs = ref(0)
 let loadSequence = 0
@@ -146,7 +146,6 @@ let chartDragStartY = 0
 let viewerResizeObserver: ResizeObserver | null = null
 let staticGesture: StaticGesture | null = null
 let staticZoomCommitTimer: number | null = null
-let playbackNoticeTimer: number | null = null
 let loadedChartAudio: LoadedChartAudio | null = null
 let appStateChangeListener: { remove: () => Promise<void> } | null = null
 let viewUnmounted = false
@@ -745,20 +744,8 @@ async function normalizeRouteSelection(musicId: number, manifest: DtxChartManife
   return { instrument, level }
 }
 
-function clearPlaybackNoticeTimer() {
-  if (playbackNoticeTimer !== null) {
-    window.clearTimeout(playbackNoticeTimer)
-    playbackNoticeTimer = null
-  }
-}
-
 function showPlaybackNotice(message: string) {
-  clearPlaybackNoticeTimer()
-  playbackNotice.value = message
-  playbackNoticeTimer = window.setTimeout(() => {
-    playbackNotice.value = ''
-    playbackNoticeTimer = null
-  }, 2400)
+  showAppToast(message, { duration: 2400 })
 }
 
 function releaseLoadedChartAudio() {
@@ -2029,7 +2016,6 @@ onBeforeUnmount(() => {
   releaseLoadedChartAudio()
   stopRafDebugMonitor()
   clearStaticZoomCommit()
-  clearPlaybackNoticeTimer()
   resetStaticGesture()
   document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
   void appStateChangeListener?.remove()
@@ -2360,12 +2346,6 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </section>
-    </Transition>
-
-    <Transition name="chart-preview-notice">
-      <div v-if="playbackNotice" class="chart-preview__playback-notice" role="status">
-        {{ playbackNotice }}
-      </div>
     </Transition>
 
     <footer class="chart-preview__player" aria-label="谱面播放控制">
@@ -2743,35 +2723,6 @@ onBeforeUnmount(() => {
   border-radius: 5px;
   background: var(--note-purple);
   color: #ffffff;
-}
-
-.chart-preview__playback-notice {
-  position: fixed;
-  right: 16px;
-  bottom: calc(var(--note-player-height) + 14px);
-  left: 16px;
-  z-index: 48;
-  width: fit-content;
-  max-width: calc(100% - 32px);
-  margin: 0 auto;
-  padding: 9px 13px;
-  border-radius: 6px;
-  background: rgba(35, 29, 48, 0.94);
-  color: #ffffff;
-  font-size: 0.78rem;
-  line-height: 1.35;
-  text-align: center;
-}
-
-.chart-preview-notice-enter-active,
-.chart-preview-notice-leave-active {
-  transition: opacity 0.16s ease, transform 0.16s ease;
-}
-
-.chart-preview-notice-enter-from,
-.chart-preview-notice-leave-to {
-  opacity: 0;
-  transform: translateY(6px);
 }
 
 .chart-preview__player {

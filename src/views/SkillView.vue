@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import AppPrimaryTopBar from '../components/AppPrimaryTopBar.vue'
 import SkillProfileBoard from '../components/SkillProfileBoard.vue'
 import SkillScoreCard from '../components/SkillScoreCard.vue'
 import dmModeToggleSrc from '../assets/skill-toggle/dm-mode.svg'
@@ -8,7 +9,6 @@ import gfModeToggleSrc from '../assets/skill-toggle/gf-mode.svg'
 import {
   clearBjmaniaSkillSnapshotCache,
   loadBjmaniaSkillSnapshotCache,
-  saveBjmaniaSkillSnapshotCache,
 } from '../lib/bjmania/cache'
 import {
   filterRecentByFamily,
@@ -21,6 +21,7 @@ import {
 } from '../lib/bjmania/client'
 import { BJMANIA_BASE_URL, clearBjmaniaCookies, isNativeBjmaniaHttp } from '../lib/bjmania/http'
 import { openBjmaniaNativeLogin } from '../lib/bjmania/native-auth'
+import { persistBjmaniaSnapshot } from '../lib/bjmania/snapshot-persistence'
 import { formatDebugJson, formatDebugValue, useDebugMode } from '../lib/debug-mode'
 import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
 import { useElementScale } from '../lib/use-element-scale'
@@ -93,7 +94,7 @@ const showFilters = ref(false)
 const showProfilePanel = ref(false)
 const openMenu = ref<SkillMenu>(null)
 const topShellRef = ref<HTMLElement | null>(null)
-const searchInputRef = ref<HTMLInputElement | null>(null)
+const primaryTopBarRef = ref<InstanceType<typeof AppPrimaryTopBar> | null>(null)
 const showAvatarGuide = ref(false)
 const showSignOutConfirm = ref(false)
 const showVersionPanel = ref(false)
@@ -354,6 +355,7 @@ async function restoreCachedSnapshot() {
   try {
     const songs = await loadSongCatalog({ mdbVersion: cached.snapshot.currentVersion })
     applySnapshotData(cached.snapshot, songs)
+    await persistBjmaniaSnapshot(cached.snapshot)
     return true
   } catch {
     return false
@@ -376,7 +378,7 @@ async function hydrateSnapshot(options?: { preserveExisting?: boolean; version?:
     const songs = await loadSongCatalog({ mdbVersion: nextSnapshot.currentVersion })
     applySnapshotData(nextSnapshot, songs)
     dataError.value = ''
-    saveBjmaniaSkillSnapshotCache(nextSnapshot)
+    await persistBjmaniaSnapshot(nextSnapshot, { trackNewRecentPlays: true })
   } catch (error) {
     if (isUnauthorizedAuthError(error)) {
       dataError.value = ''
@@ -513,7 +515,7 @@ function toggleMenu(menu: Exclude<SkillMenu, null>) { openMenu.value = openMenu.
 function selectHotFilter(value: BjmaniaScoreHotFilter) { selectedHotFilter.value = value; openMenu.value = null }
 function selectScoreFilter(value: BjmaniaScoreFilterKey) { selectedScoreFilter.value = value; openMenu.value = null }
 function selectScoreSort(value: BjmaniaScoreSortKey) { selectedScoreSort.value = value; openMenu.value = null }
-function submitSearch() { closeFilters(); searchInputRef.value?.blur() }
+function submitSearch() { closeFilters(); primaryTopBarRef.value?.blurSearch() }
 async function handleProfileBadgeClick() {
   if (showAvatarGuide.value) {
     dismissAvatarGuide()
@@ -539,17 +541,6 @@ async function handleGenerateB50() {
   showProfilePanel.value = false
   await router.push({
     name: 'skill-b50',
-    query: {
-      family: selectedFamily.value,
-      version: selectedMdbVersion.value ?? undefined,
-    },
-  })
-}
-
-async function handleOpenPlayHistory() {
-  showProfilePanel.value = false
-  await router.push({
-    name: 'skill-history',
     query: {
       family: selectedFamily.value,
       version: selectedMdbVersion.value ?? undefined,
@@ -620,33 +611,17 @@ onBeforeUnmount(() => {
 <template>
   <section class="skill-view">
     <header ref="topShellRef" class="top-shell">
-      <div class="top-shell__purple">
-        <div class="top-shell__bar top-shell__bar--skill">
-          <label class="search-shell">
-            <input
-              ref="searchInputRef"
-              v-model="scoreSearch"
-              class="search-shell__input"
-              type="search"
-              placeholder="搜索曲目/艺术家"
-              @click="openFilters"
-              @focus="openFilters"
-              @keydown.enter.prevent="submitSearch"
-            />
-            <button class="search-shell__button" type="button" :aria-label="showFilters ? '收起筛选面板' : '展开筛选面板'" @click="toggleFilters">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16L21 21"></path></svg>
-            </button>
-          </label>
-
-          <button class="profile-badge" type="button" :aria-label="isAuthenticated ? '打开 BJMANIA Profile 面板' : '打开 BJMANIA 登录页面'" @click="handleProfileBadgeClick">
-            <span v-if="isAuthenticated" class="profile-badge__initial">{{ avatarBadgeLabel }}</span>
-            <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 12C14.4853 12 16.5 9.98528 16.5 7.5C16.5 5.01472 14.4853 3 12 3C9.51472 3 7.5 5.01472 7.5 7.5C7.5 9.98528 9.51472 12 12 12Z"></path>
-              <path d="M4 20C4.83333 17.1667 7.5 15.75 12 15.75C16.5 15.75 19.1667 17.1667 20 20"></path>
-            </svg>
-          </button>
-        </div>
-      </div>
+      <AppPrimaryTopBar
+        ref="primaryTopBarRef"
+        v-model="scoreSearch"
+        :authenticated="isAuthenticated"
+        :avatar-label="avatarBadgeLabel"
+        :search-action-label="showFilters ? '收起筛选面板' : '展开筛选面板'"
+        @search-focus="openFilters"
+        @search-action="toggleFilters"
+        @search-submit="submitSearch"
+        @avatar="handleProfileBadgeClick"
+      />
 
       <transition name="panel-fade">
         <section v-if="showFilters" class="filter-drawer">
@@ -702,7 +677,6 @@ onBeforeUnmount(() => {
                 :skill-value="activeSkillValue"
                 :version-switch-disabled="loadingData"
                 @generate-b50="handleGenerateB50"
-                @play-history="handleOpenPlayHistory"
                 @select-version="openVersionSelectPanel"
                 @sign-out="openSignOutConfirm"
               />
@@ -886,6 +860,7 @@ onBeforeUnmount(() => {
   --skill-safe-top: env(safe-area-inset-top, 0px);
   --skill-top-bar-padding: calc(var(--skill-safe-top) + 15px);
   --skill-content-top-padding: calc(var(--skill-safe-top) + 100px);
+  --primary-top-bar-padding: var(--skill-top-bar-padding);
   position: relative;
   min-height: 100vh;
 }
@@ -907,75 +882,6 @@ onBeforeUnmount(() => {
   overflow: visible;
 }
 
-.top-shell__purple {
-  position: relative;
-  z-index: 2;
-  background: #4b3b76;
-  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
-}
-
-.top-shell__bar {
-  width: min(100%, 402px);
-  margin: 0 auto;
-  padding: var(--skill-top-bar-padding) 11px 15px;
-}
-
-.top-shell__bar--skill {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-}
-
-.search-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  min-height: 40px;
-  padding-left: 4px;
-  border-radius: 28px;
-  background: #ece6f0;
-  overflow: hidden;
-}
-
-.search-shell__input {
-  min-height: 40px;
-  padding: 4px 20px 4px 20px;
-  border: 0;
-  background: transparent;
-  color: #49454f;
-  box-shadow: none;
-  font-family: 'Roboto', var(--font-sans);
-  font-size: 16px;
-  letter-spacing: 0.03em;
-}
-
-.search-shell__input::placeholder {
-  color: #6b6670;
-}
-
-.search-shell__input:focus {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.search-shell__button,
-.profile-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #49454f;
-  cursor: pointer;
-}
-
-.search-shell__button svg,
-.profile-badge svg,
 .family-fab svg,
 .pill-menu__icon svg {
   width: 24px;
@@ -985,21 +891,6 @@ onBeforeUnmount(() => {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
-}
-
-.profile-badge {
-  flex: none;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.96);
-  color: #65558f;
-  box-shadow: 0 4px 10px rgba(39, 28, 78, 0.18);
-}
-
-.profile-badge__initial {
-  color: #4f378a;
-  font-family: var(--font-display);
-  font-size: 1rem;
-  font-weight: 700;
 }
 
 .avatar-guide {
@@ -1701,7 +1592,6 @@ onBeforeUnmount(() => {
     padding-right: 12px;
   }
 
-  .top-shell__bar,
   .filter-drawer,
   .profile-flyout {
     padding-left: 10px;

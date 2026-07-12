@@ -2,12 +2,15 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import appLogoSrc from '../assets/app/app-logo-noback.svg'
+import { showAppToast } from '../lib/app-toast'
 import {
   FALLBACK_VERSION_NAME,
   checkForAppUpdate,
   getInstalledAppVersionLabel,
 } from '../lib/app-update'
 import { clearCoverImageCache, getCoverImageCacheSize } from '../lib/cover-cache'
+import { clearBjmaniaRecentHistory, countBjmaniaRecentHistory } from '../lib/bjmania/recent-history'
+import { clearPendingBjmaniaRecentHistoryAnnouncements } from '../lib/bjmania/snapshot-persistence'
 import { setDebugModeEnabled, useDebugMode } from '../lib/debug-mode'
 
 const router = useRouter()
@@ -18,6 +21,10 @@ const loadingCacheSize = ref(true)
 const clearingCache = ref(false)
 const checkingUpdate = ref(false)
 const showClearConfirm = ref(false)
+const historyRecordCount = ref(0)
+const loadingHistoryCount = ref(true)
+const clearingHistory = ref(false)
+const showClearHistoryConfirm = ref(false)
 const successMessage = ref('')
 const errorMessage = ref('')
 const logoTapCount = ref(0)
@@ -62,6 +69,18 @@ async function refreshAppVersion() {
   }
 }
 
+async function refreshHistoryCount() {
+  loadingHistoryCount.value = true
+
+  try {
+    historyRecordCount.value = await countBjmaniaRecentHistory()
+  } catch {
+    historyRecordCount.value = 0
+  } finally {
+    loadingHistoryCount.value = false
+  }
+}
+
 function openClearConfirm() {
   successMessage.value = ''
   errorMessage.value = ''
@@ -89,6 +108,36 @@ async function confirmClearCache() {
     errorMessage.value = error instanceof Error ? error.message : '图片缓存清理失败'
   } finally {
     clearingCache.value = false
+  }
+}
+
+function openClearHistoryConfirm() {
+  showClearHistoryConfirm.value = true
+}
+
+function closeClearHistoryConfirm() {
+  if (!clearingHistory.value) {
+    showClearHistoryConfirm.value = false
+  }
+}
+
+async function confirmClearHistory() {
+  if (clearingHistory.value) {
+    return
+  }
+
+  clearingHistory.value = true
+
+  try {
+    await clearBjmaniaRecentHistory()
+    clearPendingBjmaniaRecentHistoryAnnouncements()
+    await refreshHistoryCount()
+    showClearHistoryConfirm.value = false
+    showAppToast('本地游玩历史已清除', { kind: 'success' })
+  } catch {
+    showAppToast('本地游玩历史清除失败', { kind: 'error' })
+  } finally {
+    clearingHistory.value = false
   }
 }
 
@@ -154,6 +203,7 @@ async function goBack() {
 onMounted(() => {
   void refreshAppVersion()
   void refreshCacheSize()
+  void refreshHistoryCount()
 })
 
 onBeforeUnmount(() => {
@@ -218,6 +268,25 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <div class="settings-row settings-row--history">
+          <div class="settings-row__text">
+            <span class="settings-row__label">本地游玩历史</span>
+          </div>
+          <div class="settings-row__actions">
+            <span class="settings-row__value">
+              {{ loadingHistoryCount ? '计算中...' : `${historyRecordCount} 条` }}
+            </span>
+            <button
+              class="settings-row__button"
+              type="button"
+              :disabled="clearingHistory || historyRecordCount === 0"
+              @click="openClearHistoryConfirm"
+            >
+              清理
+            </button>
+          </div>
+        </div>
+
         <a
           class="settings-row settings-row--link"
           href="https://github.com/9DYnastY/GD-Data"
@@ -249,6 +318,38 @@ onBeforeUnmount(() => {
             </button>
             <button class="settings-dialog__button" type="button" :disabled="clearingCache" @click="confirmClearCache">
               {{ clearingCache ? '清理中...' : '确认清理' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="settings-dialog">
+      <div
+        v-if="showClearHistoryConfirm"
+        class="settings-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="确认清理本地游玩历史"
+      >
+        <div class="settings-dialog__card">
+          <h2>清理本地游玩历史？</h2>
+          <p>这会删除所有账号在本机累积保存的游玩记录，且无法恢复。</p>
+          <div class="settings-dialog__actions">
+            <button
+              class="settings-dialog__button settings-dialog__button--ghost"
+              type="button"
+              @click="closeClearHistoryConfirm"
+            >
+              取消
+            </button>
+            <button
+              class="settings-dialog__button"
+              type="button"
+              :disabled="clearingHistory"
+              @click="confirmClearHistory"
+            >
+              {{ clearingHistory ? '清理中...' : '确认清理' }}
             </button>
           </div>
         </div>
@@ -542,7 +643,8 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 360px) {
-  .settings-row--cache {
+  .settings-row--cache,
+  .settings-row--history {
     align-items: flex-start;
     flex-direction: column;
   }

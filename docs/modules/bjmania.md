@@ -2,13 +2,17 @@
 
 ## Purpose
 
-Owns BJMANIA authentication, web/native transport dispatch, gRPC-web/protobuf encoding and decoding, score snapshot loading, profile data, best-score mapping, recent-play mapping, hot-song IDs, and cached skill snapshots.
+Owns BJMANIA authentication, web/native transport dispatch, gRPC-web/protobuf encoding and decoding, score snapshot loading, profile data, best-score mapping, account-scoped persistent recent-play history, hot-song IDs, and cached skill snapshots.
 
 ## Main Files
 
-- `src/views/SkillView.vue`: route owner for login, profile panel, score filters, score list, recent preview, sign-out, version selection, and single-card B50 export.
+- `src/views/SkillView.vue`: route owner for login, profile panel, score filters, score list, sign-out, version selection, and navigation to B50.
 - `src/views/B50View.vue`: consumes cached/live BJMANIA snapshot for poster rows.
-- `src/views/RecentPlayHistoryView.vue`: consumes cached/live BJMANIA snapshot for recent-play history.
+- `src/views/RecentPlayHistoryView.vue`: native bottom-nav route for account play history; owns day selection, search-filtered day list, infinite scroll paging, month calendar data, and in-place PlayerBoard actions.
+- `src/components/AppPrimaryTopBar.vue`: shared Skill/history search and avatar header; Skill opens its filter drawer from search focus, while history filters the selected-day list directly without a secondary drawer.
+- `src/components/RecentHistoryCalendar.vue`: year/month wheels, shared expand/collapse with the date grid, Monday-first day cells, relative play-count intensity, single-day selection, and monthly stats.
+- `src/components/AppBottomNav.vue`: native primary navigation for catalog, Skill, and play history (shared stroke icon style).
+- `src/components/AppToast.vue` and `src/lib/app-toast.ts`: global transient messages for history sync, export, chart preview, settings, and Android back handling.
 - `src/lib/bjmania/client.ts`: main facade, protocol parsers, snapshot assembly, best-score mapping, recent-play mapping, family filters, and skill formatting.
 - `src/lib/bjmania/http.ts`: runtime dispatch between web `fetch()` and Android native plugin wrappers.
 - `src/lib/bjmania/native-auth.ts`: typed wrapper for the native BJMANIA login activity.
@@ -16,17 +20,34 @@ Owns BJMANIA authentication, web/native transport dispatch, gRPC-web/protobuf en
 - `src/lib/bjmania/grpc-web.ts`: gRPC-web frame encode/decode and base64 helpers.
 - `src/lib/bjmania/protobuf.ts`: low-level protobuf read/write helpers.
 - `src/lib/bjmania/cache.ts`: localStorage snapshot cache keyed by user/version.
+- `src/lib/bjmania/recent-history.ts`: IndexedDB schema, stable play identity, account isolation, incremental merge, family/time indexes, range queries, count, and clearing.
+- `src/lib/bjmania/recent-history-calendar.ts`: local-time date keys, month grids, day/month timestamp ranges, and month shifting.
+- `src/lib/bjmania/snapshot-persistence.ts`: shared persistence coordinator that updates the latest snapshot cache, merges recent plays, tracks unannounced additions by account, and emits them when history syncs.
 - `src/types/bjmania.ts`: shared auth, profile, score, recent-play, and snapshot contracts.
+- `src/views/SettingsView.vue`: displays and clears accumulated local play history.
 - `android/app/src/main/java/com/gddata/gitadora/Bjmania*.java`: Android login, API plugin, cookie jar, and session manager.
+- `tests/bjmania-recent-history.test.mjs`: recent-play identity and normalization.
+- `tests/bjmania-recent-history-calendar.test.mjs`: calendar range and grid helpers.
 
 ## Data Flow
 
 1. `SkillView.vue` restores `loadBjmaniaSkillSnapshotCache()` for fast first paint.
 2. Login uses web BJMANIA requests or `openBjmaniaNativeLogin()` on Android.
 3. `loadBjmaniaGitadoraSnapshot()` fetches auth user, profiles, selected GITADORA profile, best scores, recent plays, and hot-song IDs.
-4. The snapshot is saved through `saveBjmaniaSkillSnapshotCache()`.
-5. `mapBestScoresToList()` and `mapRecentPlaysToList()` attach song catalog metadata and produce route-ready rows.
-6. Skill, B50, recent history, and song detail read the mapped row contracts instead of parsing BJMANIA payloads directly.
+4. Cached snapshots are passed through `persistBjmaniaSnapshot()`. The localStorage cache keeps the latest fast-start snapshot while the IndexedDB history upserts every returned recent play by account and stable play ID.
+5. Skill and B50 live syncs accumulate new records and an account-scoped pending count silently. Entering the history route performs another live sync, combines current additions with that pending count, then shows the global `新增 N条游玩记录` toast once.
+   History synchronization has no persistent loading banner; failures are reported through the global error toast while cached/local records remain visible.
+6. `mapBestScoresToList()` and `mapRecentPlaysToList()` attach song catalog metadata and produce route-ready rows.
+7. The history calendar loads the displayed local month through the account/family/time index.
+   - Expand/collapse toggles **both** the date grid and the year/month wheels: expanded shows short vertical wheels (numbers only, fixed `年`/`月` labels); collapsed keeps the same slots with static year/month values.
+   - Current year month options stop at today's month.
+   - One local day is always selected (defaults to today); selection cannot be cleared. The record list shows only that day.
+   - Monthly stats (play count, unique songs, average difficulty, SKILL net change) use the full selected-family month and **ignore** the search box.
+   - Day intensity/heatmap and the selected-day list **follow** the history search filter.
+   - SKILL net change is latest minus earliest `PlayerSkill` among that month's records (not a sum of `newSkill`).
+   - Day cell colors are relative heat: `ratio = dayCount / maxDayCountInMonth`, in four purple levels (0 / ≤0.25 / ≤0.5 / ≤0.75 / >0.75).
+8. Selected-day records load completely for that local day, then display in pages of 50. Scrolling near the bottom auto-appends the next page via an IntersectionObserver sentinel (no load-more button).
+9. Skill, B50, recent history, and song detail read the mapped row contracts instead of parsing BJMANIA payloads directly.
 
 ## Important Contracts
 
@@ -37,6 +58,12 @@ Owns BJMANIA authentication, web/native transport dispatch, gRPC-web/protobuf en
 - Native binary fetch is restricted to HTTPS and trusted BJMANIA hosts.
 - Best-score rows and recent-play rows depend on the current song catalog version to attach metadata.
 - Sign-out must clear native/web cookies and remove the cached BJMANIA snapshot.
+- Sign-out intentionally preserves persistent play history. IndexedDB records are namespaced by BJMANIA user ID and can be cleared explicitly from Settings.
+- Recent-play identity uses user, timestamp, music ID, game spec, and sequence; incomplete payloads use a deterministic raw-content fallback. Repeated upstream windows must remain idempotent.
+- Persistent records retain the raw content/payload. UI-ready song title, difficulty, and sheet metadata are derived when read so catalog updates can remap old records.
+- Play history is a primary native bottom-navigation route to the right of Skill. Its shared search bar filters song title, artist search text, and music ID directly and must not open Skill's filter drawer. Its avatar opens the same PlayerBoard menu in place, including B50, version switching, and sign-out actions.
+- Calendar grouping and ranges use the device's local timezone. Do not derive date keys from UTC ISO strings or midnight plays can appear under the wrong day.
+- Calendar day buttons opt out of global press-feedback (`data-press-feedback="off"`) so WAAPI transform animations do not delay the selected float/glow.
 
 ## Common Change Points
 
@@ -46,6 +73,12 @@ Owns BJMANIA authentication, web/native transport dispatch, gRPC-web/protobuf en
 - Change score filters or sort order: start in `src/views/SkillView.vue`; mapping usually remains in `client.ts`.
 - Change B50 eligibility or duplicate handling: inspect `markSkillEntries()` and `mapBestScoresToList()` in `client.ts`.
 - Change recent-play display fields: inspect `mapRecentPlaysToList()` and `RecentPlayHistoryView.vue`.
+- Change shared Skill/history top-bar layout: inspect `AppPrimaryTopBar.vue`; route-specific search behavior remains owned by each view.
+- Change primary route placement or history navigation icons: inspect `AppBottomNav.vue`, `router/index.ts`, and the main-route order in `App.vue`.
+- Change recent-play identity, storage indexes, merge rules, pagination, or retention: inspect `recent-history.ts` and `tests/bjmania-recent-history.test.mjs`.
+- Change calendar layout, wheels, stats, intensity colors, or expand/collapse: inspect `RecentHistoryCalendar.vue` and `RecentPlayHistoryView.vue`. Change local date boundaries: inspect `recent-history-calendar.ts` and its focused test.
+- Change snapshot persistence or new-record notification behavior: inspect `snapshot-persistence.ts`.
+- Change transient toast behavior or appearance: inspect `app-toast.ts` and `AppToast.vue`; do not add route-owned toast timers and styles.
 
 ## Pitfalls
 
@@ -54,3 +87,8 @@ Owns BJMANIA authentication, web/native transport dispatch, gRPC-web/protobuf en
 - Do not assume cached snapshot version matches the requested MDB version; cache helpers support version filtering.
 - Do not loosen native host checks for binary requests without a clear security reason.
 - Do not treat unauthorized failures as generic only; `SkillView.vue` has retry and session-clearing behavior.
+- Do not key persistent history by the selected MDB version. `GetRecentPlays` is fetched independently of that selection and would otherwise be duplicated across versions.
+- Do not delete accumulated history merely because a play is absent from the latest upstream rolling window.
+- Local accumulation cannot recover plays that never appeared in a successful fetched window; no background sync is planned.
+- Do not apply the history search filter to monthly stats; only heatmap day counts and the selected-day list should follow search.
+- Do not reintroduce a load-more button for history; keep infinite scroll via the list sentinel.

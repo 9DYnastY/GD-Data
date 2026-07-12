@@ -8,6 +8,7 @@ import favoriteIconSrc from '../assets/detail-page/favorite.png'
 import noteIconSrc from '../assets/detail-page/note.png'
 import { loadBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
 import { mapBestScoresToList } from '../lib/bjmania/client'
+import { showAppToast } from '../lib/app-toast'
 import {
   getAvailableDtxLevels,
   hasLoadedDtxChartSet,
@@ -28,14 +29,11 @@ const loading = ref(true)
 const errorMessage = ref('')
 const selectedInstrumentKey = ref<InstrumentKey>('drum')
 const scoreRows = ref<BjmaniaScoreListItem[]>([])
-const copyToastVisible = ref(false)
-const copyToastText = ref('')
 const titleScrollEl = ref<HTMLButtonElement | null>(null)
 const artistScrollEl = ref<HTMLButtonElement | null>(null)
 const coverLightboxOpen = ref(false)
 const coverSaving = ref(false)
 let stopSongCatalogUpdateListener: (() => void) | null = null
-let copyToastTimer: number | undefined
 let copyTextPointerStart: { x: number; y: number } | null = null
 let copyTextPointerDragged = false
 let autoScrollTimers: number[] = []
@@ -245,16 +243,7 @@ function fallbackCopyText(text: string) {
 }
 
 function showToast(message: string, duration = 1200) {
-  if (copyToastTimer !== undefined) {
-    window.clearTimeout(copyToastTimer)
-  }
-
-  copyToastText.value = message
-  copyToastVisible.value = true
-  copyToastTimer = window.setTimeout(() => {
-    copyToastVisible.value = false
-    copyToastTimer = undefined
-  }, duration)
+  showAppToast(message, { duration })
 }
 
 function showCopyToast() {
@@ -689,10 +678,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopSongCatalogUpdateListener?.()
   stopSongCatalogUpdateListener = null
-  if (copyToastTimer !== undefined) {
-    window.clearTimeout(copyToastTimer)
-    copyToastTimer = undefined
-  }
   clearAutoScrollTimers()
   clearCoverLongPressTimer()
   if (typeof document !== 'undefined' && previousBodyOverflow !== null) {
@@ -910,13 +895,6 @@ onBeforeUnmount(() => {
       </Transition>
     </Teleport>
 
-    <Teleport to="body">
-      <Transition name="song-detail-copy-toast">
-        <div v-if="copyToastVisible" class="song-detail__copy-toast" role="status" aria-live="polite">
-          {{ copyToastText }}
-        </div>
-      </Transition>
-    </Teleport>
   </section>
 </template>
 
@@ -1522,38 +1500,6 @@ onBeforeUnmount(() => {
 .song-detail-lightbox-leave-to .song-detail__lightbox-cover {
   opacity: 0;
   transform: scale(0.92);
-}
-
-.song-detail__copy-toast {
-  position: fixed;
-  left: 50%;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 34px);
-  z-index: 140;
-  padding: 8px 15px;
-  border-radius: 999px;
-  background: rgba(29, 23, 65, 0.9);
-  color: #ffffff;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0;
-  line-height: 18px;
-  pointer-events: none;
-  transform: translateX(-50%);
-  box-shadow: 0 8px 22px rgba(29, 23, 65, 0.24);
-}
-
-.song-detail-copy-toast-enter-active,
-.song-detail-copy-toast-leave-active {
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease;
-}
-
-.song-detail-copy-toast-enter-from,
-.song-detail-copy-toast-leave-to {
-  opacity: 0;
-  transform: translate(-50%, 8px);
 }
 
 @media (max-width: 360px) {

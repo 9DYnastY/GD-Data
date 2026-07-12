@@ -7,8 +7,10 @@ import dmModeToggleSrc from '../assets/skill-toggle/dm-mode.svg'
 import gfModeToggleSrc from '../assets/skill-toggle/gf-mode.svg'
 import { B50_POSTER_HEIGHT, B50_POSTER_WIDTH, getB50RowKey, selectB50BucketRows } from '../lib/b50'
 import { exportElementAsImage, preloadImageSource, resolveImageSourceForExport } from '../lib/b50-export'
-import { loadBjmaniaSkillSnapshotCache, saveBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
+import { showAppToast } from '../lib/app-toast'
+import { loadBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
 import { loadBjmaniaGitadoraSnapshot, mapBestScoresToList, rawSkillToText } from '../lib/bjmania/client'
+import { persistBjmaniaSnapshot } from '../lib/bjmania/snapshot-persistence'
 import { resolveCoverImageSource } from '../lib/cover-cache'
 import { useDebugMode } from '../lib/debug-mode'
 import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
@@ -62,14 +64,10 @@ const scoreRows = ref<BjmaniaScoreListItem[]>([])
 const previewScale = ref(MIN_PREVIEW_SCALE)
 const previewCoverMap = ref<Record<string, string | null>>({})
 const exportCoverMap = ref<Record<string, string | null> | null>(null)
-const noticeMessage = ref('')
-const noticeKind = ref<'success' | 'error'>('success')
-const noticeVisible = ref(false)
 const debugNameToneIndex = ref(0)
 
 let previewResizeObserver: ResizeObserver | null = null
 let previewCoverSequence = 0
-let noticeTimer: ReturnType<typeof setTimeout> | null = null
 let stopSongCatalogUpdateListener: (() => void) | null = null
 
 const selectedFamily = computed<BjmaniaScoreFamily>(() => (
@@ -113,24 +111,8 @@ function setErrorMessage(nextError: unknown, fallback: string) {
   error.value = fallback
 }
 
-function clearNotice() {
-  noticeVisible.value = false
-
-  if (noticeTimer) {
-    clearTimeout(noticeTimer)
-    noticeTimer = null
-  }
-}
-
 function showNotice(message: string, kind: 'success' | 'error') {
-  clearNotice()
-  noticeMessage.value = message
-  noticeKind.value = kind
-  noticeVisible.value = true
-  noticeTimer = setTimeout(() => {
-    noticeVisible.value = false
-    noticeTimer = null
-  }, 2200)
+  showAppToast(message, { duration: 2200, kind })
 }
 
 function updatePreviewScale() {
@@ -257,6 +239,7 @@ async function restoreCachedSnapshot() {
 
   const songs = await loadSongCatalog({ mdbVersion: cached.snapshot.currentVersion })
   applySnapshot(cached.snapshot, songs)
+  await persistBjmaniaSnapshot(cached.snapshot)
   return true
 }
 
@@ -269,7 +252,7 @@ async function hydrateLiveSnapshot() {
     })
     const songs = await loadSongCatalog({ mdbVersion: nextSnapshot.currentVersion })
     applySnapshot(nextSnapshot, songs)
-    saveBjmaniaSkillSnapshotCache(nextSnapshot)
+    await persistBjmaniaSnapshot(nextSnapshot, { trackNewRecentPlays: true })
   } finally {
     refreshing.value = false
   }
@@ -409,7 +392,6 @@ onBeforeUnmount(() => {
   previewResizeObserver?.disconnect()
   stopSongCatalogUpdateListener?.()
   stopSongCatalogUpdateListener = null
-  clearNotice()
 })
 </script>
 
@@ -497,21 +479,6 @@ onBeforeUnmount(() => {
           <span class="b50-view__spinner" aria-hidden="true"></span>
           <p>正在导出图片</p>
         </div>
-      </div>
-    </transition>
-
-    <transition name="b50-notice-fade">
-      <div
-        v-if="noticeVisible"
-        class="b50-view__notice"
-        :class="{
-          'b50-view__notice--success': noticeKind === 'success',
-          'b50-view__notice--error': noticeKind === 'error',
-        }"
-        role="status"
-        aria-live="polite"
-      >
-        {{ noticeMessage }}
       </div>
     </transition>
 
@@ -825,49 +792,14 @@ onBeforeUnmount(() => {
   animation: b50-view-spin 0.78s linear infinite;
 }
 
-.b50-view__notice {
-  position: fixed;
-  left: 50%;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 22px);
-  z-index: 82;
-  max-width: min(calc(100vw - 28px), 420px);
-  padding: 12px 18px;
-  border-radius: 999px;
-  color: #fff;
-  font-size: 0.92rem;
-  font-weight: 600;
-  line-height: 1.4;
-  text-align: center;
-  transform: translateX(-50%);
-  box-shadow: 0 14px 30px rgba(37, 21, 82, 0.22);
-  backdrop-filter: blur(10px);
-}
-
-.b50-view__notice--success {
-  background: rgba(79, 55, 138, 0.94);
-}
-
-.b50-view__notice--error {
-  background: rgba(179, 38, 30, 0.92);
-}
-
 .b50-loading-fade-enter-active,
-.b50-loading-fade-leave-active,
-.b50-notice-fade-enter-active,
-.b50-notice-fade-leave-active {
+.b50-loading-fade-leave-active {
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
 .b50-loading-fade-enter-from,
-.b50-loading-fade-leave-to,
-.b50-notice-fade-enter-from,
-.b50-notice-fade-leave-to {
+.b50-loading-fade-leave-to {
   opacity: 0;
-}
-
-.b50-notice-fade-enter-from,
-.b50-notice-fade-leave-to {
-  transform: translateX(-50%) translateY(8px);
 }
 
 @keyframes b50-view-spin {

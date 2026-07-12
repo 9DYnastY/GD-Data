@@ -1,17 +1,33 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
+import AppPrimaryTopBar from '../components/AppPrimaryTopBar.vue'
 import RecentPlayCard from '../components/RecentPlayCard.vue'
+import RecentHistoryCalendar from '../components/RecentHistoryCalendar.vue'
+import SkillProfileBoard from '../components/SkillProfileBoard.vue'
 import dmModeToggleSrc from '../assets/skill-toggle/dm-mode.svg'
 import gfModeToggleSrc from '../assets/skill-toggle/gf-mode.svg'
-import { loadBjmaniaSkillSnapshotCache, saveBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
+import { showAppToast } from '../lib/app-toast'
+import { clearBjmaniaSkillSnapshotCache, loadBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
 import { formatDebugValue, useDebugMode } from '../lib/debug-mode'
 import {
-  filterRecentByFamily,
   loadBjmaniaGitadoraSnapshot,
   mapRecentPlaysToList,
+  rawSkillToText,
 } from '../lib/bjmania/client'
+import { clearBjmaniaCookies } from '../lib/bjmania/http'
+import {
+  loadBjmaniaRecentHistoryRange,
+  normalizeRecentPlayHistoryRecords,
+  type StoredBjmaniaRecentPlay,
+} from '../lib/bjmania/recent-history'
+import {
+  formatLocalDateKey,
+  getLocalDateRange,
+  getLocalMonthRange,
+} from '../lib/bjmania/recent-history-calendar'
+import { persistBjmaniaSnapshot } from '../lib/bjmania/snapshot-persistence'
 import { loadSongCatalog, onSongCatalogUpdated } from '../lib/song-catalog'
 import type {
   BjmaniaGitadoraSnapshot,
@@ -27,6 +43,16 @@ const FAMILY_TOGGLE_ASSETS: Record<BjmaniaScoreFamily, string> = {
 const RECENT_CARD_WIDTH = 366
 const RECENT_CARD_HEIGHT = 184
 const RECENT_CARD_HORIZONTAL_PADDING = 36
+const RECENT_PAGE_SIZE = 50
+const FAMILY_LABELS: Record<BjmaniaScoreFamily, string> = { dm: 'DM', gf: 'GF' }
+const GITADORA_VERSION_LABELS: Record<number, string> = {
+  11: 'GALAXY WAVE DELTA',
+  10: 'GALAXY WAVE',
+  9: 'FUZZ-UP',
+  8: 'HIGH-VOLTAGE',
+  7: 'NEX+AGE',
+  6: 'EXCHAIN',
+}
 const MAPPING_DEBUG_PAYLOAD_KEYS = [
   'MusicId',
   'Seq',
@@ -45,12 +71,30 @@ const debugModeEnabled = useDebugMode()
 
 const loading = ref(true)
 const refreshing = ref(false)
-const error = ref('')
 const snapshot = ref<BjmaniaGitadoraSnapshot | null>(null)
-const recentRows = ref<BjmaniaRecentListItem[]>([])
-const loadedFromCache = ref(false)
+const historySearch = ref('')
+const primaryTopBarRef = ref<InstanceType<typeof AppPrimaryTopBar> | null>(null)
+const topShellRef = ref<HTMLElement | null>(null)
+const showProfilePanel = ref(false)
+const showVersionPanel = ref(false)
+const showSignOutConfirm = ref(false)
+const signingOut = ref(false)
+const calendarNow = new Date()
+const calendarYear = ref(calendarNow.getFullYear())
+const calendarMonth = ref(calendarNow.getMonth())
+const calendarCollapsed = ref(false)
+const selectedDateKey = ref(formatLocalDateKey(calendarNow.getTime() / 1000))
+const calendarRecords = ref<StoredBjmaniaRecentPlay[]>([])
+const catalogSongs = ref<SongViewModel[]>([])
+const loadedRecentRecords = ref<StoredBjmaniaRecentPlay[]>([])
+const historyLoadingMore = ref(false)
+const searchVisibleLimit = ref(RECENT_PAGE_SIZE)
+const loadMoreSentinelRef = ref<HTMLElement | null>(null)
 const viewportWidth = ref(typeof window === 'undefined' ? 402 : window.innerWidth)
 let stopSongCatalogUpdateListener: (() => void) | null = null
+let historyLoadSequence = 0
+let calendarLoadSequence = 0
+let loadMoreObserver: IntersectionObserver | null = null
 
 const selectedFamily = computed<BjmaniaScoreFamily>(() => (
   route.query.family === 'gf' ? 'gf' : 'dm'
@@ -62,11 +106,140 @@ const requestedMdbVersion = computed(() => {
 })
 const selectedFamilyLabel = computed(() => selectedFamily.value.toUpperCase())
 const selectedFamilyToggleSrc = computed(() => FAMILY_TOGGLE_ASSETS[selectedFamily.value])
-const filteredRows = computed(() => (
-  filterRecentByFamily(recentRows.value, selectedFamily.value)
-    .slice()
-    .sort((left, right) => right.timestamp - left.timestamp)
+const avatarBadgeLabel = computed(() => {
+  const name = snapshot.value?.gitadoraProfile.name?.trim() || snapshot.value?.authUser.name?.trim()
+  return name ? name.charAt(0) : 'B'
+})
+const availableVersionOptions = computed(() => {
+  const versions = snapshot.value?.availableVersions ?? []
+  return [...new Set(versions.filter((version) => Number.isFinite(version)))]
+    .sort((left, right) => right - left)
+    .map((version) => ({
+      version,
+      label: GITADORA_VERSION_LABELS[version] ?? `VERSION ${version}`,
+    }))
+})
+const activeSkillValue = computed(() => {
+  const profile = snapshot.value?.gitadoraProfile
+
+  if (!profile) {
+    return '--'
+  }
+
+  return rawSkillToText(selectedFamily.value === 'dm' ? profile.dmSkillRaw : profile.gfSkillRaw)
+})
+const normalizedHistorySearch = computed(() => historySearch.value.trim().toLowerCase())
+// Full selected-family month (ignores search). Powers the 4 monthly stats.
+const calendarMonthRows = computed(() => {
+  const mappedRows = mapRecentPlaysToList(calendarRecords.value, catalogSongs.value)
+
+  return mappedRows.filter((row) => row.family === selectedFamily.value)
+})
+// Search-filtered month rows for day intensity/heatmap only.
+const calendarHeatmapRows = computed(() => {
+  if (!normalizedHistorySearch.value) {
+    return calendarMonthRows.value
+  }
+
+  return calendarMonthRows.value.filter((row) => {
+    const searchText = (row.song?.searchText ?? String(row.musicId ?? '')).toLowerCase()
+    return searchText.includes(normalizedHistorySearch.value)
+  })
+})
+const calendarDayCounts = computed(() => calendarHeatmapRows.value.reduce<Record<string, number>>((counts, row) => {
+  const dateKey = formatLocalDateKey(row.timestamp)
+
+  if (dateKey) {
+    counts[dateKey] = (counts[dateKey] ?? 0) + 1
+  }
+
+  return counts
+}, {}))
+const calendarUniqueSongs = computed(() => new Set(
+  calendarMonthRows.value
+    .map((row) => row.musicId)
+    .filter((musicId): musicId is number => musicId !== null),
+).size)
+const calendarAverageDifficultyText = computed(() => {
+  const difficulties = calendarMonthRows.value
+    .map((row) => row.difficultyRaw)
+    .filter((difficulty) => Number.isFinite(difficulty) && difficulty > 0)
+
+  if (difficulties.length === 0) {
+    return '--'
+  }
+
+  const average = difficulties.reduce((total, difficulty) => total + difficulty, 0) / difficulties.length
+  return (average / 100).toFixed(2)
+})
+const calendarSkillDeltaText = computed(() => {
+  const playerSkillSamples = calendarMonthRows.value
+    .map((row) => {
+      const playerSkill = row.payload?.PlayerSkill
+
+      if (typeof playerSkill !== 'number' || !Number.isFinite(playerSkill)) {
+        return null
+      }
+
+      return {
+        timestamp: row.timestamp,
+        playerSkill,
+      }
+    })
+    .filter((sample): sample is { timestamp: number, playerSkill: number } => sample !== null)
+    .sort((left, right) => left.timestamp - right.timestamp || left.playerSkill - right.playerSkill)
+
+  if (playerSkillSamples.length === 0) {
+    return '--'
+  }
+
+  const earliest = playerSkillSamples[0]
+  const latest = playerSkillSamples[playerSkillSamples.length - 1]
+
+  if (!earliest || !latest) {
+    return '--'
+  }
+
+  // Month skill change from the earliest to latest recorded PlayerSkill.
+  const deltaRaw = latest.playerSkill - earliest.playerSkill
+  const absoluteText = rawSkillToText(Math.abs(deltaRaw))
+
+  if (deltaRaw > 0) {
+    return `+${absoluteText}`
+  }
+
+  if (deltaRaw < 0) {
+    return `-${absoluteText}`
+  }
+
+  return absoluteText
+})
+const matchingRecentRowEntries = computed(() => {
+  const mappedRows = mapRecentPlaysToList(loadedRecentRecords.value, catalogSongs.value)
+
+  return loadedRecentRecords.value
+    .map((record, index) => ({
+      id: record.id,
+      row: mappedRows[index] as BjmaniaRecentListItem,
+    }))
+    .filter((entry) => entry.row.family === selectedFamily.value)
+    .filter((entry) => {
+      if (!normalizedHistorySearch.value) {
+        return true
+      }
+
+      const searchText = (entry.row.song?.searchText ?? String(entry.row.musicId ?? '')).toLowerCase()
+      return searchText.includes(normalizedHistorySearch.value)
+    })
+    .sort((left, right) => right.row.timestamp - left.row.timestamp || right.id.localeCompare(left.id))
+})
+const recentRowEntries = computed(() => (
+  matchingRecentRowEntries.value.slice(0, searchVisibleLimit.value)
 ))
+const historyHasMore = computed(() => (
+  matchingRecentRowEntries.value.length > searchVisibleLimit.value
+))
+const filteredRows = computed(() => recentRowEntries.value.map((entry) => entry.row))
 const recentCardScale = computed(() => Math.min(
   1,
   Math.max(0.72, (viewportWidth.value - RECENT_CARD_HORIZONTAL_PADDING) / RECENT_CARD_WIDTH),
@@ -81,24 +254,159 @@ const stateMessage = computed(() => {
     return '正在加载游玩历史'
   }
 
-  if (error.value && !snapshot.value) {
-    return error.value
-  }
-
   if (!filteredRows.value.length) {
-    return `暂无 ${selectedFamilyLabel.value} 游玩历史`
+    if (historySearch.value.trim()) {
+      return '没有匹配的游玩记录'
+    }
+
+    return `${formatSelectedDateEmptyLabel(selectedDateKey.value)} 暂无游玩记录`
   }
 
   return ''
 })
 
-function setErrorMessage(nextError: unknown, fallback: string) {
-  error.value = nextError instanceof Error && nextError.message ? nextError.message : fallback
+function formatSelectedDateEmptyLabel(dateKey: string) {
+  const range = getLocalDateRange(dateKey)
+
+  if (!range) {
+    return dateKey
+  }
+
+  const date = new Date(range.startTime * 1000)
+  return `${date.getMonth() + 1}月${date.getDate()}日`
+}
+
+function reportHistoryError(error: unknown, fallback: string) {
+  const message = error instanceof Error && error.message ? error.message : fallback
+  showAppToast(message, { kind: 'error', duration: 2600 })
 }
 
 function applySnapshot(nextSnapshot: BjmaniaGitadoraSnapshot, songs: SongViewModel[]) {
   snapshot.value = nextSnapshot
-  recentRows.value = mapRecentPlaysToList(nextSnapshot.recentPlays.recentPlayEntries, songs)
+  catalogSongs.value = songs
+}
+
+async function loadSelectedDateHistory() {
+  const currentSnapshot = snapshot.value
+  const range = getLocalDateRange(selectedDateKey.value)
+
+  if (!currentSnapshot || !range) {
+    loadedRecentRecords.value = []
+    return false
+  }
+
+  const sequence = ++historyLoadSequence
+  const page = await loadBjmaniaRecentHistoryRange({
+    userId: currentSnapshot.authUser.id || 'unknown',
+    family: selectedFamily.value,
+    ...range,
+  })
+
+  if (sequence !== historyLoadSequence || currentSnapshot !== snapshot.value) {
+    return page.storageAvailable
+  }
+
+  if (!page.storageAvailable) {
+    const fallback = normalizeRecentPlayHistoryRecords(
+      currentSnapshot.authUser.id || 'unknown',
+      currentSnapshot.recentPlays.recentPlayEntries,
+    )
+    loadedRecentRecords.value = fallback.filter((record) => (
+      record.family === selectedFamily.value
+      && record.timestamp >= range.startTime
+      && record.timestamp < range.endTime
+    ))
+    return false
+  }
+
+  loadedRecentRecords.value = page.records
+  searchVisibleLimit.value = RECENT_PAGE_SIZE
+  return true
+}
+
+async function loadCalendarRecords() {
+  const currentSnapshot = snapshot.value
+  const range = getLocalMonthRange(calendarYear.value, calendarMonth.value)
+
+  if (!currentSnapshot) {
+    calendarRecords.value = []
+    return false
+  }
+
+  const sequence = ++calendarLoadSequence
+  const page = await loadBjmaniaRecentHistoryRange({
+    userId: currentSnapshot.authUser.id || 'unknown',
+    family: selectedFamily.value,
+    ...range,
+  })
+
+  if (sequence !== calendarLoadSequence || currentSnapshot !== snapshot.value) {
+    return page.storageAvailable
+  }
+
+  if (!page.storageAvailable) {
+    calendarRecords.value = normalizeRecentPlayHistoryRecords(
+      currentSnapshot.authUser.id || 'unknown',
+      currentSnapshot.recentPlays.recentPlayEntries,
+    ).filter((record) => (
+      record.family === selectedFamily.value
+      && record.timestamp >= range.startTime
+      && record.timestamp < range.endTime
+    ))
+    return false
+  }
+
+  calendarRecords.value = page.records
+  return true
+}
+
+async function loadCurrentStoredHistory() {
+  return await loadSelectedDateHistory()
+}
+
+function loadMoreHistory() {
+  if (historyLoadingMore.value || !historyHasMore.value) {
+    return
+  }
+
+  historyLoadingMore.value = true
+  searchVisibleLimit.value += RECENT_PAGE_SIZE
+
+  // Release the lock after paint so a still-visible sentinel can request the next page.
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      historyLoadingMore.value = false
+    })
+  })
+}
+
+function teardownLoadMoreObserver() {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+}
+
+function setupLoadMoreObserver() {
+  teardownLoadMoreObserver()
+
+  if (typeof IntersectionObserver === 'undefined' || !loadMoreSentinelRef.value) {
+    return
+  }
+
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        loadMoreHistory()
+      }
+    },
+    {
+      root: null,
+      // Prefetch slightly before the true bottom for smoother scrolling.
+      rootMargin: '160px 0px',
+      threshold: 0,
+    },
+  )
+
+  loadMoreObserver.observe(loadMoreSentinelRef.value)
 }
 
 async function restoreCachedSnapshot() {
@@ -110,22 +418,22 @@ async function restoreCachedSnapshot() {
 
   const songs = await loadSongCatalog({ mdbVersion: cached.snapshot.currentVersion })
   applySnapshot(cached.snapshot, songs)
-  loadedFromCache.value = true
+  await persistBjmaniaSnapshot(cached.snapshot)
+  await Promise.all([loadCurrentStoredHistory(), loadCalendarRecords()])
   return true
 }
 
-async function hydrateLiveSnapshot() {
+async function hydrateLiveSnapshot(version?: number) {
   refreshing.value = true
 
   try {
     const nextSnapshot = await loadBjmaniaGitadoraSnapshot({
-      version: requestedMdbVersion.value ?? snapshot.value?.currentVersion,
+      version: version ?? requestedMdbVersion.value ?? snapshot.value?.currentVersion,
     })
     const songs = await loadSongCatalog({ mdbVersion: nextSnapshot.currentVersion })
     applySnapshot(nextSnapshot, songs)
-    saveBjmaniaSkillSnapshotCache(nextSnapshot)
-    loadedFromCache.value = false
-    error.value = ''
+    await persistBjmaniaSnapshot(nextSnapshot, { announceNewRecentPlays: true })
+    await Promise.all([loadCurrentStoredHistory(), loadCalendarRecords()])
   } finally {
     refreshing.value = false
   }
@@ -133,7 +441,6 @@ async function hydrateLiveSnapshot() {
 
 async function bootstrapPage() {
   loading.value = true
-  error.value = ''
 
   let restoredFromCache = false
 
@@ -150,7 +457,7 @@ async function bootstrapPage() {
   try {
     await hydrateLiveSnapshot()
   } catch (nextError) {
-    setErrorMessage(nextError, '最近游玩数据加载失败')
+    reportHistoryError(nextError, '最近游玩数据加载失败')
   } finally {
     loading.value = false
   }
@@ -174,8 +481,134 @@ function cycleFamily() {
   switchFamily(selectedFamily.value === 'dm' ? 'gf' : 'dm')
 }
 
-function rowKey(row: BjmaniaRecentListItem, index: number) {
-  return `${row.timestamp}-${row.musicId ?? 'unknown'}-${row.instrument ?? 'unknown'}-${row.level ?? 'unknown'}-${index}`
+function toggleCalendarCollapsed() {
+  calendarCollapsed.value = !calendarCollapsed.value
+}
+
+async function setCalendarPeriod(year: number, month: number) {
+  if (calendarYear.value === year && calendarMonth.value === month) {
+    return
+  }
+
+  calendarYear.value = year
+  calendarMonth.value = month
+
+  try {
+    await loadCalendarRecords()
+  } catch (error) {
+    reportHistoryError(error, '月份记录加载失败')
+  }
+}
+
+async function selectCalendarDate(dateKey: string) {
+  if (selectedDateKey.value === dateKey) {
+    return
+  }
+
+  selectedDateKey.value = dateKey
+  searchVisibleLimit.value = RECENT_PAGE_SIZE
+
+  // Defer list reload so the calendar's local selected chrome can paint first.
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve())
+  })
+
+  try {
+    await loadCurrentStoredHistory()
+  } catch (error) {
+    reportHistoryError(error, '日期记录加载失败')
+  }
+}
+
+function focusHistorySearch() {
+  primaryTopBarRef.value?.focusSearch()
+}
+
+function handleHistorySearchFocus() {
+  showProfilePanel.value = false
+}
+
+function submitHistorySearch() {
+  primaryTopBarRef.value?.blurSearch()
+}
+
+async function handleProfileBadgeClick() {
+  if (!snapshot.value) {
+    await router.push({ name: 'skill' })
+    return
+  }
+
+  showProfilePanel.value = !showProfilePanel.value
+}
+
+async function handleGenerateB50() {
+  showProfilePanel.value = false
+  await router.push({
+    name: 'skill-b50',
+    query: {
+      family: selectedFamily.value,
+      version: snapshot.value?.currentVersion ?? undefined,
+    },
+  })
+}
+
+function openVersionSelectPanel() {
+  showProfilePanel.value = false
+  showVersionPanel.value = true
+}
+
+function closeVersionSelectPanel() {
+  if (!refreshing.value) {
+    showVersionPanel.value = false
+  }
+}
+
+function selectMdbVersion(version: number) {
+  if (refreshing.value) {
+    return
+  }
+
+  showVersionPanel.value = false
+  void hydrateLiveSnapshot(version)
+}
+
+function openSignOutConfirm() {
+  showProfilePanel.value = false
+  showSignOutConfirm.value = true
+}
+
+function cancelSignOut() {
+  if (!signingOut.value) {
+    showSignOutConfirm.value = false
+  }
+}
+
+async function confirmSignOut() {
+  if (signingOut.value) {
+    return
+  }
+
+  signingOut.value = true
+
+  try {
+    await clearBjmaniaCookies()
+    clearBjmaniaSkillSnapshotCache()
+    snapshot.value = null
+    catalogSongs.value = []
+    loadedRecentRecords.value = []
+    showSignOutConfirm.value = false
+    await router.replace({ name: 'skill' })
+  } finally {
+    signingOut.value = false
+  }
+}
+
+function handleDocumentPointerDown(event: PointerEvent) {
+  const target = event.target
+
+  if (showProfilePanel.value && topShellRef.value && target instanceof Node && !topShellRef.value.contains(target)) {
+    showProfilePanel.value = false
+  }
 }
 
 function buildSongDetailRoute(row: BjmaniaRecentListItem): RouteLocationRaw | null {
@@ -193,10 +626,10 @@ function buildSongDetailRoute(row: BjmaniaRecentListItem): RouteLocationRaw | nu
   }
 }
 
-const filteredRowEntries = computed(() => filteredRows.value.map((row, index) => ({
-  row,
-  key: rowKey(row, index),
-  detailRoute: buildSongDetailRoute(row),
+const filteredRowEntries = computed(() => recentRowEntries.value.map((entry) => ({
+  row: entry.row,
+  key: entry.id,
+  detailRoute: buildSongDetailRoute(entry.row),
 })))
 
 function mappingDebugRows(row: BjmaniaRecentListItem) {
@@ -240,16 +673,44 @@ function updateViewportWidth() {
 onMounted(() => {
   updateViewportWidth()
   window.addEventListener('resize', updateViewportWidth, { passive: true })
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
   stopSongCatalogUpdateListener = onSongCatalogUpdated((songs, catalog) => {
     if (snapshot.value && catalog.mdbVersion === snapshot.value.currentVersion) {
-      applySnapshot(snapshot.value, songs)
+      catalogSongs.value = songs
     }
   }, { mdbVersion: 'all' })
   void bootstrapPage()
 })
 
+watch(selectedFamily, () => {
+  if (snapshot.value) {
+    searchVisibleLimit.value = RECENT_PAGE_SIZE
+    void Promise.all([loadCurrentStoredHistory(), loadCalendarRecords()]).catch((error) => {
+      reportHistoryError(error, '游玩历史加载失败')
+    })
+  }
+})
+
+watch(historySearch, () => {
+  searchVisibleLimit.value = RECENT_PAGE_SIZE
+})
+
+watch(
+  [historyHasMore, () => filteredRowEntries.value.length, loadMoreSentinelRef],
+  async () => {
+    await nextTick()
+    if (historyHasMore.value) {
+      setupLoadMoreObserver()
+    } else {
+      teardownLoadMoreObserver()
+    }
+  },
+)
+
 onBeforeUnmount(() => {
+  teardownLoadMoreObserver()
   window.removeEventListener('resize', updateViewportWidth)
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
   stopSongCatalogUpdateListener?.()
   stopSongCatalogUpdateListener = null
 })
@@ -257,46 +718,112 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="recent-history-view">
-    <header class="recent-history-view__topbar">
-      <div class="recent-history-view__topbar-inner">
-        <RouterLink
-          class="recent-history-view__back"
-          :to="{ name: 'skill' }"
-          aria-label="返回 Skill"
-        >
-          <svg viewBox="0 0 40 40" aria-hidden="true">
-            <path d="M24.5 9.5L14 20L24.5 30.5" />
-            <path d="M15 20H34" />
-          </svg>
-        </RouterLink>
-        <h1>游玩历史</h1>
-      </div>
+    <header ref="topShellRef" class="top-shell">
+      <AppPrimaryTopBar
+        ref="primaryTopBarRef"
+        v-model="historySearch"
+        :authenticated="Boolean(snapshot)"
+        :avatar-label="avatarBadgeLabel"
+        placeholder="搜索游玩曲目/艺术家"
+        search-action-label="搜索游玩历史"
+        @search-focus="handleHistorySearchFocus"
+        @search-action="focusHistorySearch"
+        @search-submit="submitHistorySearch"
+        @avatar="handleProfileBadgeClick"
+      />
+      <transition name="menu-fade">
+        <div v-if="showProfilePanel && snapshot" class="profile-flyout-shell">
+          <section class="profile-flyout">
+            <SkillProfileBoard
+              :display-name="snapshot.gitadoraProfile.name || snapshot.authUser.name || 'BJMANIA'"
+              :title="snapshot.gitadoraProfile.title || 'No title'"
+              :mode-label="FAMILY_LABELS[selectedFamily]"
+              :show-version-switch="availableVersionOptions.length > 0"
+              :skill-value="activeSkillValue"
+              :version-switch-disabled="refreshing"
+              @generate-b50="handleGenerateB50"
+              @select-version="openVersionSelectPanel"
+              @sign-out="openSignOutConfirm"
+            />
+          </section>
+        </div>
+      </transition>
     </header>
 
+    <transition name="sign-out-dialog">
+      <div
+        v-if="showVersionPanel"
+        class="version-select-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-version-dialog-title"
+        @click.self="closeVersionSelectPanel"
+      >
+        <div class="version-select-dialog__card">
+          <h2 id="history-version-dialog-title">选择版本</h2>
+          <div class="version-select-dialog__options">
+            <button
+              v-for="option in availableVersionOptions"
+              :key="option.version"
+              class="version-select-dialog__option"
+              :class="{ 'version-select-dialog__option--active': option.version === snapshot?.currentVersion }"
+              type="button"
+              :disabled="refreshing"
+              @click="selectMdbVersion(option.version)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+          <button class="version-select-dialog__cancel" type="button" :disabled="refreshing" @click="closeVersionSelectPanel">
+            取消
+          </button>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="sign-out-dialog">
+      <div
+        v-if="showSignOutConfirm"
+        class="sign-out-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-sign-out-dialog-title"
+        @click.self="cancelSignOut"
+      >
+        <div class="sign-out-dialog__card">
+          <h2 id="history-sign-out-dialog-title">确定要登出账号吗？</h2>
+          <div class="sign-out-dialog__actions">
+            <button class="sign-out-dialog__button sign-out-dialog__button--ghost" type="button" :disabled="signingOut" @click="cancelSignOut">
+              取消
+            </button>
+            <button class="sign-out-dialog__button" type="button" :disabled="signingOut" @click="confirmSignOut">
+              确定
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
     <main class="recent-history-view__content">
-      <p
-        v-if="refreshing && filteredRows.length"
-        class="recent-history-view__sync"
-      >
-        正在同步最新 BJMANIA 数据...
-      </p>
-      <p
-        v-else-if="loadedFromCache && filteredRows.length"
-        class="recent-history-view__sync"
-      >
-        使用缓存中，若此条消息长时存在，请尝试重新登录
-      </p>
-      <p
-        v-else-if="error && filteredRows.length"
-        class="recent-history-view__sync recent-history-view__sync--error"
-      >
-        刷新失败：{{ error }}
-      </p>
+      <RecentHistoryCalendar
+        v-if="snapshot"
+        :year="calendarYear"
+        :month="calendarMonth"
+        :day-counts="calendarDayCounts"
+        :selected-date-key="selectedDateKey"
+        :collapsed="calendarCollapsed"
+        :total-plays="calendarMonthRows.length"
+        :unique-songs="calendarUniqueSongs"
+        :average-difficulty-text="calendarAverageDifficultyText"
+        :skill-delta-text="calendarSkillDeltaText"
+        @change-period="setCalendarPeriod"
+        @toggle-collapsed="toggleCalendarCollapsed"
+        @select-date="selectCalendarDate"
+      />
 
       <section
         v-if="stateMessage"
         class="recent-history-view__state-card"
-        :class="{ 'recent-history-view__state-card--error': error && !snapshot }"
       >
         <p>{{ stateMessage }}</p>
       </section>
@@ -344,6 +871,12 @@ onBeforeUnmount(() => {
             </details>
           </section>
         </div>
+        <div
+          v-if="historyHasMore"
+          ref="loadMoreSentinelRef"
+          class="recent-history-view__load-sentinel"
+          aria-hidden="true"
+        ></div>
       </section>
     </main>
 
@@ -363,64 +896,145 @@ onBeforeUnmount(() => {
   --recent-safe-top: env(safe-area-inset-top, 0px);
   --recent-top-bar-padding: calc(var(--recent-safe-top) + 15px);
   --recent-content-top-padding: calc(var(--recent-safe-top) + 100px);
+  --primary-top-bar-padding: var(--recent-top-bar-padding);
   position: relative;
   min-height: 100vh;
   overflow-x: hidden;
   background: transparent;
 }
 
-.recent-history-view__topbar {
+.top-shell {
   position: fixed;
   top: 0;
   right: 0;
   left: 0;
   z-index: 30;
-  width: 100%;
-  background: #4b3b76;
-  box-shadow: 0 4px 15.8px rgba(133, 121, 168, 0.82);
+  overflow: visible;
 }
 
-.recent-history-view__topbar-inner {
+.profile-flyout-shell {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  justify-content: center;
+  padding-top: 10px;
+  pointer-events: none;
+}
+
+.profile-flyout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   width: min(100%, 402px);
   margin: 0 auto;
-  padding: var(--recent-top-bar-padding) 11px 15px;
+  padding: 0 11px;
+  pointer-events: auto;
 }
 
-.recent-history-view__back {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 40px;
-  height: 40px;
-  color: #ffffff;
-  text-decoration: none;
+.sign-out-dialog,
+.version-select-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(20, 12, 48, 0.34);
+  backdrop-filter: blur(8px);
 }
 
-.recent-history-view__back svg {
-  width: 34px;
-  height: 34px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: square;
-  stroke-linejoin: miter;
-  stroke-width: 3.2;
+.sign-out-dialog__card,
+.version-select-dialog__card {
+  display: grid;
+  gap: 18px;
+  width: min(100%, 312px);
+  padding: 22px 20px 18px;
+  border: 1px solid rgba(79, 55, 138, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 56px rgba(31, 16, 63, 0.24);
 }
 
-.recent-history-view__topbar h1 {
+.sign-out-dialog__card h2,
+.version-select-dialog__card h2 {
+  margin: 0;
+  color: #1d1741;
+  font-family: var(--font-sans);
+  font-size: 1.05rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.version-select-dialog__options {
+  display: grid;
+  gap: 8px;
+}
+
+.version-select-dialog__option,
+.version-select-dialog__cancel,
+.sign-out-dialog__button {
   display: flex;
   align-items: center;
+  justify-content: center;
   min-height: 40px;
-  margin: 0;
+  padding: 0 14px;
+  border: 1px solid rgba(79, 55, 138, 0.12);
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.version-select-dialog__option {
+  background: rgba(79, 55, 138, 0.08);
+  color: #4f378a;
+}
+
+.version-select-dialog__option--active,
+.sign-out-dialog__button {
+  border-color: #4f378a;
+  background: #4f378a;
   color: #ffffff;
-  font-family: var(--font-figma-title);
-  font-size: 22px;
-  font-weight: 400;
-  line-height: 1;
-  letter-spacing: 0.01em;
+}
+
+.version-select-dialog__cancel,
+.sign-out-dialog__button--ghost {
+  background: transparent;
+  color: rgba(29, 23, 65, 0.72);
+}
+
+.sign-out-dialog__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.version-select-dialog__option:disabled,
+.version-select-dialog__cancel:disabled,
+.sign-out-dialog__button:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+
+.menu-fade-enter-active,
+.menu-fade-leave-active,
+.sign-out-dialog-enter-active,
+.sign-out-dialog-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+.sign-out-dialog-enter-from,
+.sign-out-dialog-leave-to {
+  opacity: 0;
 }
 
 .recent-history-view__content {
@@ -429,25 +1043,6 @@ onBeforeUnmount(() => {
   width: min(100%, 402px);
   margin: 0 auto;
   padding: var(--recent-content-top-padding) 18px 96px;
-}
-
-.recent-history-view__sync {
-  width: 366px;
-  max-width: 100%;
-  margin: 0 auto 14px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.62);
-  color: #34226c;
-  font-family: var(--font-figma-title);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-align: center;
-  backdrop-filter: blur(8px);
-}
-
-.recent-history-view__sync--error {
-  color: #b3261e;
 }
 
 .recent-history-view__state-card {
@@ -463,10 +1058,6 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.76);
   box-shadow: 0 12px 28px rgba(40, 28, 88, 0.14);
   backdrop-filter: blur(10px);
-}
-
-.recent-history-view__state-card--error {
-  border-color: rgba(179, 38, 30, 0.32);
 }
 
 .recent-history-view__state-card p {
@@ -485,6 +1076,13 @@ onBeforeUnmount(() => {
   display: grid;
   justify-items: center;
   gap: calc(28px * var(--recent-card-scale));
+}
+
+.recent-history-view__load-sentinel {
+  width: 100%;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
 }
 
 .recent-history-view__card-shell {

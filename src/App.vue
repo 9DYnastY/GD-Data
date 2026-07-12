@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import AppBottomNav from './components/AppBottomNav.vue'
+import AppToast from './components/AppToast.vue'
 import {
   appUpdateActionError,
   appUpdateDialogVisible,
@@ -19,10 +20,12 @@ import {
   startAppUpdateDownload,
   syncNativeAppUpdateState,
 } from './lib/app-update'
+import { clearAppToast, showAppToast } from './lib/app-toast'
 
 const MAIN_ROUTE_ORDER: Record<string, number> = {
   home: 0,
   skill: 1,
+  'skill-history': 2,
 }
 const MAIN_ROUTE_TRANSITION_MS = 360
 const MAIN_ROUTE_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)'
@@ -30,24 +33,13 @@ const MAIN_ROUTE_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)'
 const route = useRoute()
 const router = useRouter()
 const showBottomNav = computed(() => route.meta.showBottomNav === true)
-const exitToastVisible = ref(false)
 const backgroundVideoRef = ref<HTMLVideoElement | null>(null)
 const backgroundVideoReady = ref(false)
 const routeTransitionName = ref('')
 
 let backButtonListener: { remove: () => Promise<void> } | null = null
 let appStateChangeListener: { remove: () => Promise<void> } | null = null
-let exitToastTimer: ReturnType<typeof setTimeout> | null = null
 let lastExitAttemptAt = 0
-
-function clearExitToast() {
-  exitToastVisible.value = false
-
-  if (exitToastTimer) {
-    clearTimeout(exitToastTimer)
-    exitToastTimer = null
-  }
-}
 
 function markBackgroundVideoReady() {
   backgroundVideoReady.value = true
@@ -62,7 +54,7 @@ function shouldReduceMotion() {
 }
 
 function getMainRouteInner(element: Element) {
-  return element.querySelector<HTMLElement>('.home-view__inner, .skill-view__inner')
+  return element.querySelector<HTMLElement>('.home-view__inner, .skill-view__inner, .recent-history-view__content')
 }
 
 function getMainRouteTopShell(element: Element) {
@@ -196,12 +188,7 @@ function handleMainRouteLeave(element: Element, done: () => void) {
 }
 
 function showExitToast() {
-  clearExitToast()
-  exitToastVisible.value = true
-  exitToastTimer = setTimeout(() => {
-    exitToastVisible.value = false
-    exitToastTimer = null
-  }, 1800)
+  showAppToast('再次返回回到桌面')
 }
 
 async function handleStartAppUpdateDownload() {
@@ -210,11 +197,6 @@ async function handleStartAppUpdateDownload() {
 
 async function handleAndroidBackButton() {
   if (route.name === 'skill-b50') {
-    await router.replace({ name: 'skill' })
-    return
-  }
-
-  if (route.name === 'skill-history') {
     await router.replace({ name: 'skill' })
     return
   }
@@ -252,7 +234,7 @@ async function handleAndroidBackButton() {
     const now = Date.now()
 
     if (now - lastExitAttemptAt < 1800) {
-      clearExitToast()
+      clearAppToast()
       await App.exitApp()
       return
     }
@@ -315,7 +297,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  clearExitToast()
+  clearAppToast()
   void backButtonListener?.remove()
   backButtonListener = null
   void appStateChangeListener?.remove()
@@ -367,11 +349,7 @@ onBeforeUnmount(() => {
     </RouterView>
   </div>
   <AppBottomNav v-if="showBottomNav" />
-  <transition name="exit-toast">
-    <div v-if="exitToastVisible" class="exit-toast" role="status" aria-live="polite">
-      再次返回回到桌面
-    </div>
-  </transition>
+  <AppToast />
   <transition name="app-update-dialog">
     <div
       v-if="appUpdateDialogVisible && availableAppUpdate"
@@ -483,36 +461,6 @@ onBeforeUnmount(() => {
 .app-background__overlay {
   z-index: 1;
   background: rgba(128, 128, 128, 0.4);
-}
-
-.exit-toast {
-  position: fixed;
-  left: 50%;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
-  z-index: 64;
-  min-width: 180px;
-  padding: 10px 18px;
-  border-radius: 999px;
-  background: rgba(44, 28, 86, 0.92);
-  color: #fff;
-  font-family: 'Roboto', var(--font-sans);
-  font-size: 0.86rem;
-  font-weight: 500;
-  text-align: center;
-  box-shadow: 0 12px 28px rgba(31, 16, 63, 0.24);
-  transform: translateX(-50%);
-  backdrop-filter: blur(10px);
-}
-
-.exit-toast-enter-active,
-.exit-toast-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
-}
-
-.exit-toast-enter-from,
-.exit-toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(10px);
 }
 
 .app-update-dialog {

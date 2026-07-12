@@ -2,7 +2,7 @@
 
 ## Project Summary
 
-GD Data is a Vue 3 + TypeScript + Vite app packaged in a Capacitor Android shell. It supports GITADORA song browsing, local MDB catalog data, BJMANIA score views, B50 export, DTX chart previews, cover/media caching, app updates, and Android-native bridges.
+GD Data is a Vue 3 + TypeScript + Vite app packaged in a Capacitor Android shell. It supports GITADORA song browsing, local MDB catalog data, BJMANIA score views and persistent play history, B50 export, DTX chart previews, cover/media caching, app updates, and Android-native bridges.
 
 This documentation is an AI navigation layer. It is intentionally smaller than the codebase. Source code remains the authority.
 
@@ -34,7 +34,7 @@ This documentation is an AI navigation layer. It is intentionally smaller than t
 | Task | Read |
 |---|---|
 | Song list, search, filters, difficulty ruler, BIN parsing, unified MDB supplements/resources, Remy links, version logos | `docs/modules/song-catalog.md` |
-| BJMANIA login, auth, profile, best scores, recent plays, hot songs, protocol parsing | `docs/modules/bjmania.md` |
+| BJMANIA login, auth, profile, best scores, persistent recent plays, hot songs, protocol parsing | `docs/modules/bjmania.md` |
 | B50 poster, B50 score cards, html2canvas export, image output | `docs/modules/b50-export.md` |
 | DTX chart preview, MDB chart index, parser, static canvas, realtime playback, A-B loop, drum annotations, annotation export | `docs/modules/chart-preview.md` |
 | Cover loading, preload, native cover cache, export-safe image sources | `docs/modules/media-cache.md` |
@@ -51,6 +51,12 @@ This documentation is an AI navigation layer. It is intentionally smaller than t
 | Song normalization | `src/lib/song-normalizer.ts` |
 | BJMANIA snapshot | `src/lib/bjmania/client.ts` |
 | BJMANIA runtime dispatch | `src/lib/bjmania/http.ts` |
+| BJMANIA local play history | `src/lib/bjmania/recent-history.ts` |
+| Play-history calendar helpers | `src/lib/bjmania/recent-history-calendar.ts` |
+| Snapshot + history merge | `src/lib/bjmania/snapshot-persistence.ts` |
+| Global transient messages | `src/lib/app-toast.ts`, `src/components/AppToast.vue` |
+| Shared Skill/history top bar | `src/components/AppPrimaryTopBar.vue` |
+| Play-history calendar UI | `src/components/RecentHistoryCalendar.vue` |
 | B50 selection | `src/lib/b50.ts` |
 | Image export | `src/lib/b50-export.ts` |
 | Cover cache | `src/lib/cover-cache.ts` |
@@ -79,6 +85,11 @@ This documentation is an AI navigation layer. It is intentionally smaller than t
 - `first_ver` in MDB data contains separate GF/DM version values; version filters must respect the selected instrument family.
 - The unified MDB index is remote R2 data; local BIN parsing remains the song metadata authority.
 - BJMANIA web and Android runtimes use different transport paths but should return the same frontend data contracts.
+- BJMANIA recent plays are an upstream rolling window. Every successful live snapshot is merged into an account-scoped IndexedDB history; never replace the accumulated store with only the latest response.
+- The play-history route always displays one selected local day (default today) and does not support an unselected all-entries mode.
+- History monthly stats ignore search; day heatmap intensity and the selected-day list still honor search.
+- History list pages of 50 auto-load near the bottom via IntersectionObserver; do not reintroduce a load-more button.
+- Calendar day cells opt out of global press-feedback so selected float/glow is not delayed by WAAPI transform animations.
 - Native BJMANIA binary fetches are intentionally restricted to trusted HTTPS BJMANIA asset hosts.
 - Cover cache behavior is Android-native only; web display should continue to work without native cache APIs.
 - Export image paths must be html2canvas-safe and often need data URLs or native cache conversion.
@@ -95,5 +106,7 @@ This documentation is an AI navigation layer. It is intentionally smaller than t
 - Use `rg --files` or `Test-Path` to confirm documented paths.
 - Use `npm run build` for TypeScript/Vite validation when code changes.
 - Use `node --test tests/chart-preview-loop.test.mjs` for A-B range and seek logic.
+- Use `node --test tests/bjmania-recent-history.test.mjs` for recent-play identity and normalization logic.
+- Use `node --test tests/bjmania-recent-history-calendar.test.mjs` for calendar date ranges and month grids.
 - Use Android/Capacitor checks only when native plugin behavior changes.
 - For docs-only changes, path existence checks are usually enough.

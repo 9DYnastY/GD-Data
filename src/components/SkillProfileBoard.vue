@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import boardBackgroundSrc from '../assets/skill-page/Player_Board/background.svg'
 import b50ButtonSrc from '../assets/skill-page/Player_Board/b50_button.svg'
 import logoutButtonSrc from '../assets/skill-page/Player_Board/logout_button.svg'
-import playHistoryButtonSrc from '../assets/skill-page/Player_Board/playhistory_button.svg'
 import skillIconSrc from '../assets/skill-page/Player_Board/Skill_icon.svg'
 import swapHorizSrc from '../assets/skill-page/Player_Board/swap_horiz.svg'
 import { resolveSkillToneStyle, splitSkillValueText } from '../lib/skill-tone'
@@ -22,7 +21,6 @@ const props = defineProps<{
 
 defineEmits<{
   generateB50: []
-  playHistory: []
   signOut: []
   selectVersion: []
 }>()
@@ -126,17 +124,6 @@ onBeforeUnmount(() => {
         >
           <img :src="b50ButtonSrc" alt="" aria-hidden="true" />
           <span>生成B50</span>
-        </button>
-
-        <button
-          class="skill-profile-board__action skill-profile-board__action--history"
-          type="button"
-          aria-label="游玩历史"
-          title="游玩历史"
-          @click="$emit('playHistory')"
-        >
-          <img :src="playHistoryButtonSrc" alt="" aria-hidden="true" />
-          <span>游玩历史</span>
         </button>
 
         <button
@@ -347,13 +334,8 @@ onBeforeUnmount(() => {
   left: 155px;
 }
 
-.skill-profile-board__action--history {
-  top: 201px;
-  left: 155px;
-}
-
 .skill-profile-board__action--logout {
-  top: 249px;
+  top: 201px;
   left: 155px;
 }
 </style>
