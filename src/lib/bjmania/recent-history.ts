@@ -5,10 +5,11 @@ import type {
 } from '../../types/bjmania'
 
 const RECENT_HISTORY_DB_NAME = 'gddata-bjmania-history'
-const RECENT_HISTORY_DB_VERSION = 1
+const RECENT_HISTORY_DB_VERSION = 2
 const RECENT_HISTORY_STORE = 'recent-plays'
 const RECENT_HISTORY_USER_TIME_INDEX = 'by-user-time'
 const RECENT_HISTORY_USER_FAMILY_TIME_INDEX = 'by-user-family-time'
+const RECENT_HISTORY_USER_MUSIC_TIME_INDEX = 'by-user-music-time'
 
 export interface StoredBjmaniaRecentPlay extends BjmaniaRecentPlay {
   id: string
@@ -145,6 +146,10 @@ function openRecentHistoryDb() {
 
       if (store && !store.indexNames.contains(RECENT_HISTORY_USER_FAMILY_TIME_INDEX)) {
         store.createIndex(RECENT_HISTORY_USER_FAMILY_TIME_INDEX, ['userId', 'family', 'timestamp'])
+      }
+
+      if (store && !store.indexNames.contains(RECENT_HISTORY_USER_MUSIC_TIME_INDEX)) {
+        store.createIndex(RECENT_HISTORY_USER_MUSIC_TIME_INDEX, ['userId', 'musicId', 'timestamp'])
       }
     }
     request.onsuccess = () => {
@@ -294,6 +299,90 @@ export async function loadBjmaniaRecentHistoryRange(options: {
   return await loadBjmaniaRecentHistoryPage({
     ...options,
     limit: Number.MAX_SAFE_INTEGER - 1,
+  })
+}
+
+export async function loadBjmaniaRecentHistoryForMusic(options: {
+  userId: string
+  musicId: number
+}): Promise<RecentHistoryPage> {
+  const db = await openRecentHistoryDb()
+
+  if (!db) {
+    return { records: [], hasMore: false, storageAvailable: false }
+  }
+
+  if (!Number.isFinite(options.musicId)) {
+    db.close()
+    return { records: [], hasMore: false, storageAvailable: true }
+  }
+
+  return await new Promise<RecentHistoryPage>((resolve, reject) => {
+    const transaction = db.transaction(RECENT_HISTORY_STORE, 'readonly')
+    const store = transaction.objectStore(RECENT_HISTORY_STORE)
+    const records: StoredBjmaniaRecentPlay[] = []
+
+    const readFromIndex = () => {
+      const index = store.index(RECENT_HISTORY_USER_MUSIC_TIME_INDEX)
+      const range = IDBKeyRange.bound(
+        [options.userId, options.musicId, Number.MIN_SAFE_INTEGER],
+        [options.userId, options.musicId, Number.MAX_SAFE_INTEGER],
+      )
+      const request = index.openCursor(range, 'next')
+
+      request.onsuccess = () => {
+        const cursor = request.result
+
+        if (!cursor) {
+          return
+        }
+
+        records.push(cursor.value as StoredBjmaniaRecentPlay)
+        cursor.continue()
+      }
+    }
+
+    // Older DBs may still be mid-upgrade; fall back to a filtered user-time scan.
+    if (store.indexNames.contains(RECENT_HISTORY_USER_MUSIC_TIME_INDEX)) {
+      readFromIndex()
+    } else {
+      const index = store.index(RECENT_HISTORY_USER_TIME_INDEX)
+      const range = IDBKeyRange.bound(
+        [options.userId, Number.MIN_SAFE_INTEGER],
+        [options.userId, Number.MAX_SAFE_INTEGER],
+      )
+      const request = index.openCursor(range, 'next')
+
+      request.onsuccess = () => {
+        const cursor = request.result
+
+        if (!cursor) {
+          return
+        }
+
+        const record = cursor.value as StoredBjmaniaRecentPlay
+
+        if (record.musicId === options.musicId) {
+          records.push(record)
+        }
+
+        cursor.continue()
+      }
+    }
+
+    transaction.oncomplete = () => {
+      db.close()
+      resolve({
+        records,
+        hasMore: false,
+        storageAvailable: true,
+      })
+    }
+    transaction.onerror = () => {
+      const error = transaction.error
+      db.close()
+      reject(error)
+    }
   })
 }
 

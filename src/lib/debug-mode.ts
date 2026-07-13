@@ -1,4 +1,5 @@
 import { readonly, ref } from 'vue'
+import { clearDebugFakeHistory } from './bjmania/debug-fake-history'
 
 const debugModeEnabled = ref(false)
 
@@ -8,6 +9,11 @@ export function useDebugMode() {
 
 export function setDebugModeEnabled(enabled: boolean) {
   debugModeEnabled.value = enabled
+
+  // Debug-only fake plays must never outlive debug mode or touch real storage.
+  if (!enabled) {
+    clearDebugFakeHistory()
+  }
 }
 
 export function formatDebugValue(value: unknown) {

@@ -57,6 +57,7 @@ This documentation is an AI navigation layer. It is intentionally smaller than t
 | Global transient messages | `src/lib/app-toast.ts`, `src/components/AppToast.vue` |
 | Shared Skill/history top bar | `src/components/AppPrimaryTopBar.vue` |
 | Play-history calendar UI | `src/components/RecentHistoryCalendar.vue` |
+| Per-song skill curve | `src/lib/bjmania/song-skill-history.ts`, `src/components/SongSkillHistoryChart.vue` |
 | B50 selection | `src/lib/b50.ts` |
 | Image export | `src/lib/b50-export.ts` |
 | Cover cache | `src/lib/cover-cache.ts` |
@@ -90,6 +91,8 @@ This documentation is an AI navigation layer. It is intentionally smaller than t
 - History monthly stats ignore search; day heatmap intensity and the selected-day list still honor search.
 - History list pages of 50 auto-load near the bottom via IntersectionObserver; do not reintroduce a load-more button.
 - Calendar day cells opt out of global press-feedback so selected float/glow is not delayed by WAAPI transform animations.
+- Song-detail “游玩记录” skill curves use local history only; hide when logged out or no plays for the current instrument; failed plays plot at skill 0.
+- Debug fake history is memory-only (`debug-fake:` ids, GALAXY WAVE songs), cleared when debug mode is disabled; never merge into real IndexedDB.
 - Native BJMANIA binary fetches are intentionally restricted to trusted HTTPS BJMANIA asset hosts.
 - Cover cache behavior is Android-native only; web display should continue to work without native cache APIs.
 - Export image paths must be html2canvas-safe and often need data URLs or native cache conversion.

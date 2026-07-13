@@ -18,6 +18,10 @@ import {
 } from '../lib/bjmania/client'
 import { clearBjmaniaCookies } from '../lib/bjmania/http'
 import {
+  generateDebugFakeHistoryForDay,
+  mergeWithDebugFakeHistory,
+} from '../lib/bjmania/debug-fake-history'
+import {
   loadBjmaniaRecentHistoryRange,
   normalizeRecentPlayHistoryRecords,
   type StoredBjmaniaRecentPlay,
@@ -311,15 +315,29 @@ async function loadSelectedDateHistory() {
       currentSnapshot.authUser.id || 'unknown',
       currentSnapshot.recentPlays.recentPlayEntries,
     )
-    loadedRecentRecords.value = fallback.filter((record) => (
+    const realRecords = fallback.filter((record) => (
       record.family === selectedFamily.value
       && record.timestamp >= range.startTime
       && record.timestamp < range.endTime
     ))
+    loadedRecentRecords.value = debugModeEnabled.value
+      ? mergeWithDebugFakeHistory(realRecords, (record) => (
+        record.family === selectedFamily.value
+        && record.timestamp >= range.startTime
+        && record.timestamp < range.endTime
+      ))
+      : realRecords
+    searchVisibleLimit.value = RECENT_PAGE_SIZE
     return false
   }
 
-  loadedRecentRecords.value = page.records
+  loadedRecentRecords.value = debugModeEnabled.value
+    ? mergeWithDebugFakeHistory(page.records, (record) => (
+      record.family === selectedFamily.value
+      && record.timestamp >= range.startTime
+      && record.timestamp < range.endTime
+    ))
+    : page.records
   searchVisibleLimit.value = RECENT_PAGE_SIZE
   return true
 }
@@ -345,7 +363,7 @@ async function loadCalendarRecords() {
   }
 
   if (!page.storageAvailable) {
-    calendarRecords.value = normalizeRecentPlayHistoryRecords(
+    const realRecords = normalizeRecentPlayHistoryRecords(
       currentSnapshot.authUser.id || 'unknown',
       currentSnapshot.recentPlays.recentPlayEntries,
     ).filter((record) => (
@@ -353,10 +371,23 @@ async function loadCalendarRecords() {
       && record.timestamp >= range.startTime
       && record.timestamp < range.endTime
     ))
+    calendarRecords.value = debugModeEnabled.value
+      ? mergeWithDebugFakeHistory(realRecords, (record) => (
+        record.family === selectedFamily.value
+        && record.timestamp >= range.startTime
+        && record.timestamp < range.endTime
+      ))
+      : realRecords
     return false
   }
 
-  calendarRecords.value = page.records
+  calendarRecords.value = debugModeEnabled.value
+    ? mergeWithDebugFakeHistory(page.records, (record) => (
+      record.family === selectedFamily.value
+      && record.timestamp >= range.startTime
+      && record.timestamp < range.endTime
+    ))
+    : page.records
   return true
 }
 
@@ -479,6 +510,37 @@ function switchFamily(family: BjmaniaScoreFamily) {
 
 function cycleFamily() {
   switchFamily(selectedFamily.value === 'dm' ? 'gf' : 'dm')
+}
+
+function handleGenerateDebugFakeHistory() {
+  if (!debugModeEnabled.value || !snapshot.value) {
+    return
+  }
+
+  const result = generateDebugFakeHistoryForDay({
+    userId: snapshot.value.authUser.id || 'unknown',
+    dateKey: selectedDateKey.value,
+    family: selectedFamily.value,
+    songs: catalogSongs.value,
+    count: 30,
+  })
+
+  if (result.reason === 'no-wave-songs') {
+    showAppToast('当前曲库没有 GALAXY WAVE 曲目，无法生成', { kind: 'error', duration: 2400 })
+    return
+  }
+
+  if (result.added <= 0) {
+    showAppToast('调试假数据生成失败', { kind: 'error', duration: 2000 })
+    return
+  }
+
+  // Reload list/calendar from real storage, then re-merge fakes in the loaders.
+  void Promise.all([loadCurrentStoredHistory(), loadCalendarRecords()]).then(() => {
+    showAppToast(`已生成 ${result.added} 条 WAVE 调试假数据`, { kind: 'success', duration: 2000 })
+  }).catch((error) => {
+    reportHistoryError(error, '调试假数据生成失败')
+  })
 }
 
 function toggleCalendarCollapsed() {
@@ -695,6 +757,15 @@ watch(historySearch, () => {
   searchVisibleLimit.value = RECENT_PAGE_SIZE
 })
 
+watch(debugModeEnabled, (enabled) => {
+  if (!enabled && snapshot.value) {
+    // Leaving debug clears fakes; refresh UI back to real-only records.
+    void Promise.all([loadCurrentStoredHistory(), loadCalendarRecords()]).catch(() => {
+      // Real reload failures are non-fatal here; fakes are already cleared.
+    })
+  }
+})
+
 watch(
   [historyHasMore, () => filteredRowEntries.value.length, loadMoreSentinelRef],
   async () => {
@@ -880,14 +951,25 @@ onBeforeUnmount(() => {
       </section>
     </main>
 
-    <button
-      class="family-fab"
-      type="button"
-      :aria-label="`切换游玩历史模式，当前 ${selectedFamilyLabel}`"
-      @click="cycleFamily"
-    >
-      <img class="family-fab__image" :src="selectedFamilyToggleSrc" alt="" aria-hidden="true" />
-    </button>
+    <div class="history-fab-stack">
+      <button
+        v-if="debugModeEnabled && snapshot"
+        class="debug-generate-fab"
+        type="button"
+        aria-label="为当前选中日生成调试假数据"
+        @click="handleGenerateDebugFakeHistory"
+      >
+        生成
+      </button>
+      <button
+        class="family-fab"
+        type="button"
+        :aria-label="`切换游玩历史模式，当前 ${selectedFamilyLabel}`"
+        @click="cycleFamily"
+      >
+        <img class="family-fab__image" :src="selectedFamilyToggleSrc" alt="" aria-hidden="true" />
+      </button>
+    </div>
   </section>
 </template>
 
@@ -1190,11 +1272,35 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
-.family-fab {
+.history-fab-stack {
   position: fixed;
   right: 14px;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
   z-index: 32;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.debug-generate-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #4f378a;
+  color: #ffffff;
+  font-family: var(--font-figma-title);
+  font-size: 0.82rem;
+  font-weight: 700;
+  box-shadow: 0 6px 16px rgba(79, 55, 138, 0.28);
+  cursor: pointer;
+}
+
+.family-fab {
   display: inline-flex;
   align-items: center;
   justify-content: center;

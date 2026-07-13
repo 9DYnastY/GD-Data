@@ -6,9 +6,17 @@ import bookOpenIconSrc from '../assets/detail-page/book-open.png'
 import favoriteSelectedIconSrc from '../assets/detail-page/favorite-selected.png'
 import favoriteIconSrc from '../assets/detail-page/favorite.png'
 import noteIconSrc from '../assets/detail-page/note.png'
+import SongSkillHistoryChart from '../components/SongSkillHistoryChart.vue'
 import { loadBjmaniaSkillSnapshotCache } from '../lib/bjmania/cache'
 import { mapBestScoresToList } from '../lib/bjmania/client'
+import { mergeWithDebugFakeHistory } from '../lib/bjmania/debug-fake-history'
+import { loadBjmaniaRecentHistoryForMusic } from '../lib/bjmania/recent-history'
+import {
+  mapRecordsToSongSkillHistoryPoints,
+  type SongSkillHistoryPoint,
+} from '../lib/bjmania/song-skill-history'
 import { showAppToast } from '../lib/app-toast'
+import { useDebugMode } from '../lib/debug-mode'
 import {
   getAvailableDtxLevels,
   hasLoadedDtxChartSet,
@@ -24,11 +32,14 @@ import type { DifficultySlot, InstrumentDifficulty, InstrumentKey, LevelKey, Son
 
 const route = useRoute()
 const router = useRouter()
+const debugModeEnabled = useDebugMode()
 const song = ref<SongViewModel>()
 const loading = ref(true)
 const errorMessage = ref('')
 const selectedInstrumentKey = ref<InstrumentKey>('drum')
 const scoreRows = ref<BjmaniaScoreListItem[]>([])
+const skillHistoryPoints = ref<SongSkillHistoryPoint[]>([])
+const skillHistoryUserId = ref<string | null>(null)
 const titleScrollEl = ref<HTMLButtonElement | null>(null)
 const artistScrollEl = ref<HTMLButtonElement | null>(null)
 const coverLightboxOpen = ref(false)
@@ -139,14 +150,54 @@ function syncCachedScoreRows(currentSong: SongViewModel) {
 
   if (!cached) {
     scoreRows.value = []
+    skillHistoryUserId.value = null
     return
   }
 
+  skillHistoryUserId.value = cached.snapshot.authUser.id?.trim() || null
   scoreRows.value = mapBestScoresToList(
     cached.snapshot.bestScores.bestScores,
     [currentSong],
     cached.snapshot.hotMusicIds,
   ).filter((row) => row.musicId === currentSong.musicId)
+}
+
+async function loadSkillHistoryForCurrentSong() {
+  const currentSong = song.value
+  const userId = skillHistoryUserId.value
+
+  if (!currentSong || !userId) {
+    skillHistoryPoints.value = []
+    return
+  }
+
+  try {
+    const page = await loadBjmaniaRecentHistoryForMusic({
+      userId,
+      musicId: currentSong.musicId,
+    })
+
+    if (!page.storageAvailable && !debugModeEnabled.value) {
+      skillHistoryPoints.value = []
+      return
+    }
+
+    const realRecords = page.storageAvailable ? page.records : []
+    const records = debugModeEnabled.value
+      ? mergeWithDebugFakeHistory(realRecords, (record) => record.musicId === currentSong.musicId)
+      : realRecords
+
+    skillHistoryPoints.value = mapRecordsToSongSkillHistoryPoints(
+      records,
+      [currentSong],
+      {
+        musicId: currentSong.musicId,
+        instrument: selectedInstrumentKey.value,
+      },
+    )
+  } catch {
+    skillHistoryPoints.value = []
+  }
 }
 
 async function loadCurrentSong() {
@@ -176,10 +227,13 @@ async function loadCurrentSong() {
     if (!result.instruments.some((instrument) => instrument.key === selectedInstrumentKey.value)) {
       selectedInstrumentKey.value = result.instruments[0]?.key ?? 'drum'
     }
+    await loadSkillHistoryForCurrentSong()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '歌曲详情加载失败'
     song.value = undefined
     scoreRows.value = []
+    skillHistoryPoints.value = []
+    skillHistoryUserId.value = null
   } finally {
     loading.value = false
   }
@@ -633,6 +687,10 @@ const isCurrentSongFavorite = computed(() => {
   return song.value ? favoriteMusicIds.value.has(song.value.musicId) : false
 })
 
+const showSkillHistory = computed(() => (
+  Boolean(skillHistoryUserId.value) && skillHistoryPoints.value.length > 0
+))
+
 watch(
   () => route.query.instrument,
   () => {
@@ -642,6 +700,12 @@ watch(
 )
 
 watch(() => [route.params.musicId, route.query.version], loadCurrentSong)
+
+watch(selectedInstrumentKey, () => {
+  if (song.value && !loading.value) {
+    void loadSkillHistoryForCurrentSong()
+  }
+})
 
 watch(
   () => [song.value?.musicId, loading.value] as const,
@@ -853,6 +917,12 @@ onBeforeUnmount(() => {
               </div>
             </button>
           </div>
+
+          <SongSkillHistoryChart
+            v-if="showSkillHistory"
+            class="song-detail__skill-history"
+            :points="skillHistoryPoints"
+          />
         </section>
       </template>
     </main>
@@ -1286,6 +1356,10 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px var(--detail-card-gap-x);
+}
+
+.song-detail__skill-history {
+  margin-top: 16px;
 }
 
 .song-detail__chart-card {

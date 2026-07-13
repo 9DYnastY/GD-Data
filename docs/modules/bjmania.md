@@ -20,7 +20,10 @@ Owns BJMANIA authentication, web/native transport dispatch, gRPC-web/protobuf en
 - `src/lib/bjmania/grpc-web.ts`: gRPC-web frame encode/decode and base64 helpers.
 - `src/lib/bjmania/protobuf.ts`: low-level protobuf read/write helpers.
 - `src/lib/bjmania/cache.ts`: localStorage snapshot cache keyed by user/version.
-- `src/lib/bjmania/recent-history.ts`: IndexedDB schema, stable play identity, account isolation, incremental merge, family/time indexes, range queries, count, and clearing.
+- `src/lib/bjmania/recent-history.ts`: IndexedDB schema, stable play identity, account isolation, incremental merge, family/time/music indexes, range queries, per-song load, count, and clearing.
+- `src/lib/bjmania/song-skill-history.ts`: maps local plays to per-song skill curve points (failed plays at skill 0).
+- `src/components/SongSkillHistoryChart.vue`: song-detail “游玩记录” multi-level skill chart (BAS/ADV/EXT/MAS colors), tap-point bubble only.
+- `src/lib/bjmania/debug-fake-history.ts`: debug-only in-memory fake plays (id prefix `debug-fake:`); GALAXY WAVE music pool; cleared when debug mode turns off.
 - `src/lib/bjmania/recent-history-calendar.ts`: local-time date keys, month grids, day/month timestamp ranges, and month shifting.
 - `src/lib/bjmania/snapshot-persistence.ts`: shared persistence coordinator that updates the latest snapshot cache, merges recent plays, tracks unannounced additions by account, and emits them when history syncs.
 - `src/types/bjmania.ts`: shared auth, profile, score, recent-play, and snapshot contracts.
@@ -47,7 +50,9 @@ Owns BJMANIA authentication, web/native transport dispatch, gRPC-web/protobuf en
    - SKILL net change is latest minus earliest `PlayerSkill` among that month's records (not a sum of `newSkill`).
    - Day cell colors are relative heat: `ratio = dayCount / maxDayCountInMonth`, in four purple levels (0 / ≤0.25 / ≤0.5 / ≤0.75 / >0.75).
 8. Selected-day records load completely for that local day, then display in pages of 50. Scrolling near the bottom auto-appends the next page via an IntersectionObserver sentinel (no load-more button).
-9. Skill, B50, recent history, and song detail read the mapped row contracts instead of parsing BJMANIA payloads directly.
+9. Song detail loads per-song history via `loadBjmaniaRecentHistoryForMusic()` (index `by-user-music-time`). When the user is logged in and the current instrument has local plays, `SongSkillHistoryChart` shows a skill-over-time curve under the difficulty grid. All levels share one chart with difficulty colors; failed plays plot at skill 0; the block is hidden when logged out or empty. Chart title is `游玩记录`.
+10. Debug mode (Settings logo easter egg): history route shows a **生成** FAB above the family toggle. Each click appends 30 in-memory fake plays for the selected day/family, using only **GALAXY WAVE** catalog songs. Fakes merge into history UI and song skill charts while debug is on, never touch IndexedDB, and are cleared when debug mode is disabled.
+11. Skill, B50, recent history, and song detail read the mapped row contracts instead of parsing BJMANIA payloads directly.
 
 ## Important Contracts
 
@@ -77,6 +82,8 @@ Owns BJMANIA authentication, web/native transport dispatch, gRPC-web/protobuf en
 - Change primary route placement or history navigation icons: inspect `AppBottomNav.vue`, `router/index.ts`, and the main-route order in `App.vue`.
 - Change recent-play identity, storage indexes, merge rules, pagination, or retention: inspect `recent-history.ts` and `tests/bjmania-recent-history.test.mjs`.
 - Change calendar layout, wheels, stats, intensity colors, or expand/collapse: inspect `RecentHistoryCalendar.vue` and `RecentPlayHistoryView.vue`. Change local date boundaries: inspect `recent-history-calendar.ts` and its focused test.
+- Change per-song skill curve mapping or colors: inspect `song-skill-history.ts` and `SongSkillHistoryChart.vue`; wire-up lives in `SongDetailView.vue`.
+- Change debug fake history generation or isolation: inspect `debug-fake-history.ts`, `debug-mode.ts`, and the history FAB in `RecentPlayHistoryView.vue`.
 - Change snapshot persistence or new-record notification behavior: inspect `snapshot-persistence.ts`.
 - Change transient toast behavior or appearance: inspect `app-toast.ts` and `AppToast.vue`; do not add route-owned toast timers and styles.
 
@@ -92,3 +99,5 @@ Owns BJMANIA authentication, web/native transport dispatch, gRPC-web/protobuf en
 - Local accumulation cannot recover plays that never appeared in a successful fetched window; no background sync is planned.
 - Do not apply the history search filter to monthly stats; only heatmap day counts and the selected-day list should follow search.
 - Do not reintroduce a load-more button for history; keep infinite scroll via the list sentinel.
+- Debug fake history (`debug-fake-history.ts`) is in-memory only, id-prefixed `debug-fake:`, never written to IndexedDB, and is cleared when debug mode turns off. Do not feed fakes into `mergeBjmaniaRecentHistory` or Settings clear/count paths.
+- Per-song skill curves use payload `Skill` (failed → 0). Do not plot `newSkill` or account `PlayerSkill` as the Y axis.

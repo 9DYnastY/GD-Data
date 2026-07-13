@@ -9,7 +9,8 @@ Owns GITADORA song catalog loading, binary MDB parsing, unified MDB supplement l
 - `src/views/HomeView.vue`: route owner for catalog search, version/catalog/difficulty filters, selected instrument, sort state, virtualized list entries, cover preloading, and settings navigation.
 - `src/components/DifficultyRangeSlider.vue`: draggable 0.5-wide difficulty ruler with 0.1-step left-boundary refinement used by the home filter drawer.
 - `src/components/SongCard.vue` and `src/components/DifficultyGrid.vue`: compact song card rendering and matched difficulty-cell highlighting for home-list results.
-- `src/views/SongDetailView.vue`: route owner for a single song, selected instrument, BJMANIA cached score rows, cover saving, Remy WebView link, note-button chart-preview navigation, and difficulty-card chart-preview navigation.
+- `src/views/SongDetailView.vue`: route owner for a single song, selected instrument, BJMANIA cached score rows, “游玩记录” skill curve under the difficulty grid (logged-in + local plays for current instrument), cover saving, Remy WebView link, note-button chart-preview navigation, and difficulty-card chart-preview navigation.
+- `src/components/SongSkillHistoryChart.vue` and `src/lib/bjmania/song-skill-history.ts`: multi-level skill history chart fed by local recent-play storage.
 - `src/lib/song-catalog.ts`: local binary MDB manifest fetch, catalog promise caches, unified MDB merge, and public catalog loaders.
 - `src/lib/mdb-parser.ts`: binary protobuf-style MDB parser that produces `SongCatalogResponse`.
 - `src/lib/mdb-index.ts`: remote `mdb.json` validation, in-memory loading, and IndexedDB fallback cache.
@@ -63,7 +64,7 @@ Owns GITADORA song catalog loading, binary MDB parsing, unified MDB supplement l
 - Change display title, artist, BPM, difficulty, tags, or search text: start in `src/lib/song-normalizer.ts`.
 - Change unified MDB parsing or cache behavior: start in `src/lib/mdb-index.ts`.
 - Change cover, DTX, or OPUS object naming: start in `src/lib/mdb-assets.ts`.
-- Change detail-page Remy links, note-button chart navigation, or difficulty-card chart navigation: inspect `src/views/SongDetailView.vue`.
+- Change detail-page Remy links, note-button chart navigation, difficulty-card chart navigation, or the skill history chart block: inspect `src/views/SongDetailView.vue` and `SongSkillHistoryChart.vue`.
 - Add MDB-hosted assets through the shared resolver rather than hard-coding R2 URLs in views.
 
 ## Pitfalls
